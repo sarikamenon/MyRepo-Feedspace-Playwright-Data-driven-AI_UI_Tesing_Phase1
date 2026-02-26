@@ -1,0 +1,60 @@
+name: Daily AI Visual Validation
+
+on:
+  schedule:
+    - cron: '30 5 * * *'   # 09:30 AM GMT+4
+  workflow_dispatch:
+
+jobs:
+  validate-widgets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Restore Processed URLs Cache
+        uses: actions/cache@v4
+        with:
+          path: testData/processed_urls.json
+          key: processed-urls-${{ github.run_id }}
+          restore-keys: |
+            processed-urls-
+
+      - name: Run AI Visual Validation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BASECAMP_TOKEN: ${{ secrets.BASECAMP_TOKEN }}
+          BASECAMP_ACCOUNT_ID: 4294983
+          BASECAMP_PROJECT_ID: 19240348
+          BASECAMP_CHAT_ID: 7605911660
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node runners/runApiValidation.js
+
+      - name: Commit Processed URLs Progress
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update processed URLs rotation state [skip ci]"
+          file_pattern: 'testData/processed_urls.json'
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          path: reports/
+          retention-days: 30
