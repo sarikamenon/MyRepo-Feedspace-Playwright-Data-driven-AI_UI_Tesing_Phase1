@@ -1,0 +1,38 @@
+name: UI Tests - On Demand
+
+on:
+  repository_dispatch:
+    types: [run-ui-tests]
+
+jobs:
+  ui-tests-ondemand:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Run On-Demand Validation
+        run: node runners/runApiValidation.ondemand.js
+        env:
+          WIDGET_DATA: ${{ toJson(github.event.client_payload) }}
+
+      - name: Save processed URLs back to repo
+        run: |
+          git config user.email "bot@feedspace.io"
+          git config user.name "Feedspace Bot"
+          git add testData/processed_urls_ondemand.json
+          git diff --staged --quiet || git commit -m "chore: update on-demand processed URLs"
+          git push

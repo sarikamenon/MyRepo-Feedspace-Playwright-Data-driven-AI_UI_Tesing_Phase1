@@ -1,0 +1,30 @@
+{
+  "name": "playwright-bdd-cucumber-pom-framework",
+  "version": "1.0.0",
+  "description": "BDD Automation Framework using Playwright, Cucumber, and POM",
+  "main": "index.js",
+  "scripts": {
+    "test": "node runValidation.js"
+  },
+  "keywords": [
+    "playwright",
+    "ai",
+    "automation",
+    "testing"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "prettier": "^3.0.0"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.13.5",
+    "body-parser": "^2.2.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "xlsx": "^0.18.5"
+  }
+}
