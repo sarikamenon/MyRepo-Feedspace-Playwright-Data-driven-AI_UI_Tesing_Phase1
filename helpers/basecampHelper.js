@@ -29,7 +29,11 @@ class BasecampHelper {
                 runDetails += `\nVerification Results:\n`;
                 run.aiAnalysis.feature_results.forEach(f => {
                     const fEmoji = f.status === "PASS" ? "✅" : (f.status === "FAIL" ? "❌" : "⚠️");
-                    runDetails += `- ${f.feature}: ${fEmoji} ${f.status} (${f.ui_status || f.actual})\n`;
+                    const uiStatus = f.ui_status || f.actual || 'N/A';
+                    const configStatus = f.config_status || f.expected || 'N/A';
+
+                    // Show comparison in result line
+                    runDetails += `- ${f.feature}: ${fEmoji} ${f.status} (UI: ${uiStatus}, Config: ${configStatus})\n`;
                 });
             } else if (run.error) {
                 runDetails += `\nError: ${run.error}\n`;
