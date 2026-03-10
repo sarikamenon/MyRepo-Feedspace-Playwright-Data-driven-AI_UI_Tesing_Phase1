@@ -94,6 +94,7 @@ async function run() {
         const entry = testData[i];
         const url = entry.customer_url || entry.url;
         const typeId = entry.widget_type || entry.type;
+        const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
 
         console.log(`\n[${i + 1}/${testData.length}] Processing: ${url}`);
@@ -125,8 +126,7 @@ async function run() {
                     console.log(`   > [Retry ${urlAttempt}/${maxUrlAttempts}] Restarting validation for: ${url}`);
                 }
 
-                // 1. Identify Widget Type
-                const typeName = WidgetDetector.identify({ type: typeId });
+                // 1. Identify Widget Type (already normalized)
                 console.log(`   > Type Identified: ${typeName} (ID: ${typeId})`);
 
                 // 2. Map to Config File
@@ -169,7 +169,7 @@ async function run() {
                 if (urlAttempt >= maxUrlAttempts) {
                     results.push({
                         url: url,
-                        widgetType: typeId,
+                        widgetType: typeName,
                         status: 'ERROR',
                         error: error.message,
                         timestamp: new Date().toISOString()

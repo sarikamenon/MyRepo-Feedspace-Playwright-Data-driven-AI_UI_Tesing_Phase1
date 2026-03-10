@@ -29,7 +29,6 @@ const WidgetTypeNames = {
 // MARQUEE_STRIPE (backend) === STRIP_SLIDER (frontend)
 const WidgetAliases = {
     'stripslider': 'MARQUEE_STRIPE',
-    'strip_slider': 'MARQUEE_STRIPE',
     'marqueeslider': 'MARQUEE_STRIPE',
     'carouselslider': 'CAROUSEL_SLIDER',
     'carousel': 'CAROUSEL_SLIDER',
@@ -94,7 +93,7 @@ class WidgetDetector {
      * Priority: data attribute ID → data attribute name → CSS class signatures
      * FIX: Explicit numeric parse, timeout guard, word-boundary CSS matching, SINGLE_SLIDER added
      */
-    static async discover(locator) {
+    static async discover(locator, networkMap = {}) {
         if (!locator) return 'Unknown';
 
         let info = null;
@@ -102,12 +101,13 @@ class WidgetDetector {
         try {
             info = await Promise.race([
                 locator.evaluate(async (el) => {
-                    const getAttr = (element) =>
-                        element.getAttribute('data-widget-type') ||
-                        element.getAttribute('widget_type_id') ||
-                        element.getAttribute('data-type') ||
-                        element.getAttribute('data-feedspace-type') ||
-                        element.getAttribute('data-id');
+                    const getAttr = (element) => {
+                        return element.getAttribute('data-widget-type') ||
+                            element.getAttribute('widget_type_id') ||
+                            element.getAttribute('data-type') ||
+                            element.getAttribute('data-feedspace-type') ||
+                            element.getAttribute('data-id');
+                    };
 
                     // 1. Search UPWARDS for any widget identifier
                     let current = el;
@@ -125,6 +125,14 @@ class WidgetDetector {
                             const innerWidget = doc.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id]');
                             if (innerWidget) id = getAttr(innerWidget);
                         } catch (e) { /* ignore cross-origin errors */ }
+                    }
+
+                    // 2.5 Shadow DOM handling
+                    if (!id && el.shadowRoot) {
+                        try {
+                            const shadowWidget = el.shadowRoot.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id], .feedspace-widget, .feedspace-element-feed-box-wrap');
+                            if (shadowWidget) id = getAttr(shadowWidget);
+                        } catch (e) { }
                     }
 
                     // 3. Search DOWNWARDS if still not found
@@ -155,7 +163,12 @@ class WidgetDetector {
                         .join(' ');
 
                     const allClasses = `${parentClasses} ${ownClasses} ${childClasses}`.toLowerCase().trim();
-                    const htmlSnippet = el.innerHTML ? el.innerHTML.toLowerCase().substring(0, 800) : '';
+
+                    let rawHtml = el.innerHTML || '';
+                    if (el.shadowRoot) {
+                        rawHtml += ' ' + el.shadowRoot.innerHTML;
+                    }
+                    const htmlSnippet = rawHtml.toLowerCase().substring(0, 1500);
 
                     return { idAttr: id, allClasses, htmlSnippet, isFeedspaceAnchor };
                 }),
@@ -170,8 +183,13 @@ class WidgetDetector {
 
         if (!info) return 'Unknown';
 
-        // ── PRIORITY 1: ID Attribute (Numeric or String) ─────────────────────
+        // ── PRIORITY 1: ID Attribute (UUID Network Map, Numeric, or String) ──────
         if (info.idAttr !== null && info.idAttr !== undefined) {
+            // Priority 1A: Check if UUID matches our network intercept map
+            if (networkMap[info.idAttr]) {
+                return networkMap[info.idAttr];
+            }
+
             const numericId = parseInt(info.idAttr, 10);
             if (!isNaN(numericId) && WidgetTypeConstants[numericId]) {
                 return WidgetTypeConstants[numericId];
@@ -208,6 +226,7 @@ class WidgetDetector {
             if (html.includes('horizontal-scroll') || html.includes('left-right')) return 'MARQUEE_LEFTRIGHT';
             if (html.includes('carousel')) return 'CAROUSEL_SLIDER';
             if (html.includes('strip-slider')) return 'MARQUEE_STRIPE';
+            if (html.includes('single-slider') || html.includes('single-review')) return 'SINGLE_SLIDER';
 
             // Default anchor guess for scrolling widgets
             return 'MARQUEE_UPDOWN';
