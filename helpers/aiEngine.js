@@ -24,6 +24,7 @@ class AIEngine {
         let attempts = 0;
 
         while (attempts <= this.maxRetries) {
+            let text = "";
             try {
                 attempts++;
                 const prompt = PromptBuilder.build(widgetType, config, staticFeatures, buffers.length > 1);
@@ -38,7 +39,7 @@ class AIEngine {
                 console.log(`[AIEngine] Sending ${buffers.length} screenshot(s) to Gemini for ${widgetType} validation (Attempt ${attempts})...`);
                 const result = await this.model.generateContent([prompt, ...imageParts]);
                 const response = await result.response;
-                const text = response.text();
+                text = response.text();
 
                 const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
                 const aiResults = JSON.parse(cleanText);

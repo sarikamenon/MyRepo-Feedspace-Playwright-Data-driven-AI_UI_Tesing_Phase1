@@ -124,6 +124,7 @@ async function run() {
         const entry = dailyBatch[i];
         const url = entry.customer_url || entry.url;
         const typeId = entry.widget_type || entry.type;
+        const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
 
         console.log(`\n[${i + 1}/${dailyBatch.length}] Processing: ${url}`);
@@ -142,7 +143,6 @@ async function run() {
             try {
                 if (attempt > 1) console.log(`   > Attempt ${attempt}/${maxAttempts}...`);
 
-                const typeName = WidgetDetector.identify({ type: typeId });
                 const configFileName = WIDGET_CONFIG_MAP[typeName] || typeName.toLowerCase();
                 const configPath = path.join(process.cwd(), 'Configs', `${configFileName}.json`);
 
@@ -170,7 +170,7 @@ async function run() {
                 console.error(`   > Attempt ${attempt} failed: ${error.message}`);
                 if (attempt >= maxAttempts) {
                     const record = {
-                        url, widgetType: typeId, status: 'ERROR', error: lastError, timestamp: new Date().toISOString(), aiAnalysis: { message: 'Failed after 3 attempts: ' + lastError }
+                        url, widgetType: typeName, status: 'ERROR', error: lastError, timestamp: new Date().toISOString(), aiAnalysis: { message: 'Failed after 3 attempts: ' + lastError }
                     };
                     results.push(record);
                 }

@@ -107,6 +107,7 @@ async function run() {
         const entry = newUrls[i];
         const url = entry.customer_url || entry.url;
         const typeId = entry.widget_type || entry.type;
+        const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
 
         console.log(`\n[${i + 1}/${newUrls.length}] Processing: ${url}`);
@@ -125,7 +126,6 @@ async function run() {
             try {
                 if (attempt > 1) console.log(`   > Attempt ${attempt}/${maxAttempts}...`);
 
-                const typeName = WidgetDetector.identify({ type: typeId });
                 const configFileName = WIDGET_CONFIG_MAP[typeName] || typeName.toLowerCase();
                 const configPath = path.join(process.cwd(), 'Configs', `${configFileName}.json`);
 
@@ -156,7 +156,7 @@ async function run() {
                 if (attempt >= maxAttempts) {
                     results.push({
                         url,
-                        widgetType: typeId,
+                        widgetType: typeName,
                         status: 'ERROR',
                         error: lastError,
                         timestamp: new Date().toISOString(),
