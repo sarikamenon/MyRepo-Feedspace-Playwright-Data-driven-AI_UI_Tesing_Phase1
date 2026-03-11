@@ -89,9 +89,9 @@ async function run() {
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
 
-    const processedUrls = loadProcessedUrls();
+    const processedUrls = loadProcessedUrls().map(u => u.replace(/\/$/, ''));
     const newUrls = allApiData.filter(entry => {
-        const urlToCheck = entry.customer_url || entry.url;
+        const urlToCheck = (entry.customer_url || entry.url || '').replace(/\/$/, '');
         return !processedUrls.includes(urlToCheck);
     });
 
