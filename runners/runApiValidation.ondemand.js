@@ -89,9 +89,18 @@ async function run() {
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
 
-    // For On-Demand, we usually want to run even if previously processed (e.g. config changed)
-    // But we still track it for history.
-    const newUrls = allApiData;
+    const processedUrls = loadProcessedUrls();
+    const newUrls = allApiData.filter(entry => {
+        const urlToCheck = entry.customer_url || entry.url;
+        return !processedUrls.includes(urlToCheck);
+    });
+
+    if (newUrls.length === 0) {
+        console.log('[OnDemand] All incoming URLs have already been processed. Skipping execution.');
+        process.exit(0);
+    }
+
+    console.log(`[OnDemand] ${newUrls.length} NEW URL(s) to process after filtering.`);
 
     const browser = await chromium.launch({
         headless: true,
