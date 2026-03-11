@@ -43,4 +43,14 @@ jobs:
           git config user.name "Feedspace Bot"
           git add testData/processed_urls_ondemand.json
           git diff --staged --quiet || git commit -m "chore: update on-demand processed URLs"
+          git pull --rebase origin main
           git push
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          path: |
+            reports/
+          retention-days: 30
