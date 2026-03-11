@@ -10,12 +10,21 @@ require('dotenv').config();
 const PROCESSED_URLS_FILE = path.join(process.cwd(), 'testData', 'processed_urls_ondemand.json');
 
 /**
+ * Normalizes a URL for consistent comparison.
+ */
+function normalizeUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    return url.trim().toLowerCase().replace(/\/$/, '');
+}
+
+/**
  * Loads processed URLs from file.
  */
 function loadProcessedUrls() {
     if (fs.existsSync(PROCESSED_URLS_FILE)) {
         try {
-            return JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8'));
+            const data = JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8'));
+            return Array.isArray(data) ? data.map(normalizeUrl) : [];
         } catch (e) {
             console.error('[OnDemand] Failed to load processed_urls_ondemand.json, starting fresh.');
             return [];
@@ -28,10 +37,16 @@ function loadProcessedUrls() {
  * Saves processed URLs to file.
  */
 function saveProcessedUrl(url) {
+    const normalized = normalizeUrl(url);
+    if (!normalized) return;
+
     let processed = loadProcessedUrls();
-    if (!processed.includes(url)) {
-        processed.push(url);
-        fs.writeFileSync(PROCESSED_URLS_FILE, JSON.stringify(processed, null, 2));
+    // We store the original URL but check against normalized versions
+    const rawProcessed = fs.existsSync(PROCESSED_URLS_FILE) ? JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8')) : [];
+    
+    if (!processed.includes(normalized)) {
+        rawProcessed.push(url);
+        fs.writeFileSync(PROCESSED_URLS_FILE, JSON.stringify(rawProcessed, null, 2));
     }
 }
 
@@ -89,10 +104,11 @@ async function run() {
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
 
-    const processedUrls = loadProcessedUrls().map(u => u.replace(/\/$/, ''));
+    const processedUrls = loadProcessedUrls();
     const newUrls = allApiData.filter(entry => {
-        const urlToCheck = (entry.customer_url || entry.url || '').replace(/\/$/, '');
-        return !processedUrls.includes(urlToCheck);
+        const rawUrl = typeof entry === 'string' ? entry : (entry.customer_url || entry.url || '');
+        const normalized = normalizeUrl(rawUrl);
+        return normalized && !processedUrls.includes(normalized);
     });
 
     if (newUrls.length === 0) {
@@ -114,7 +130,7 @@ async function run() {
 
     for (let i = 0; i < newUrls.length; i++) {
         const entry = newUrls[i];
-        const url = entry.customer_url || entry.url;
+        const url = typeof entry === 'string' ? entry : (entry.customer_url || entry.url);
         const typeId = entry.widget_type || entry.type;
         const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
@@ -194,6 +210,10 @@ async function run() {
 
     const reportPath = await reportHelper.saveReport(finalReport);
     console.log(`\n[OnDemand] Validation Complete. Report: ${reportPath}`);
+
+    // Generate Visual HTML Dashboard
+    await reportHelper.generateHtmlReport(finalReport);
+    console.log(`[OnDemand] HTML Dashboard generated in reports folder.`);
 
     const basecampHelper = new BasecampHelper();
     await basecampHelper.sendReport(finalReport)
