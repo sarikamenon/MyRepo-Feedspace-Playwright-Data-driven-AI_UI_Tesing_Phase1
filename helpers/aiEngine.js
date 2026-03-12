@@ -49,10 +49,14 @@ class AIEngine {
 
             } catch (error) {
                 const isRateLimit = error.message.includes('429') || error.status === 429;
+                const isTransientFetch = error.message.includes('fetch failed') || 
+                                       error.message.includes('ECONNRESET') || 
+                                       error.message.includes('ETIMEDOUT');
 
-                if (isRateLimit && attempts <= this.maxRetries) {
+                if ((isRateLimit || isTransientFetch) && attempts <= this.maxRetries) {
                     const delay = this.initialDelay * Math.pow(2, attempts - 1);
-                    console.warn(`[AIEngine] Rate limit reached (429). Retrying in ${delay}ms... (Attempt ${attempts}/${this.maxRetries})`);
+                    const reason = isRateLimit ? 'Rate limit (429)' : 'Transient network error';
+                    console.warn(`[AIEngine] ${reason}. Retrying in ${delay}ms... (Attempt ${attempts}/${this.maxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }

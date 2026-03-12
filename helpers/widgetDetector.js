@@ -25,8 +25,7 @@ const WidgetTypeNames = {
     FLOATING_TOAST: 11
 };
 
-// FIX: Frontend alias terms that map to backend constants
-// MARQUEE_STRIPE (backend) === STRIP_SLIDER (frontend)
+// Frontend alias terms that map to backend constants
 const WidgetAliases = {
     'stripslider': 'MARQUEE_STRIPE',
     'marqueeslider': 'MARQUEE_STRIPE',
@@ -43,7 +42,6 @@ const WidgetAliases = {
 };
 
 // CSS class signatures mapped to widget types
-// FIX: Use exact class tokens instead of loose .includes() to avoid false positives
 const CSS_SIGNATURES = [
     { classes: ['feedspace-vertical-scroll', 'feedspace-updown', 'vertical-marquee'], type: 'MARQUEE_UPDOWN' },
     { classes: ['fe-feedspace-avatar-group-widget-wrap', 'feedspace-avatar-group'], type: 'AVATAR_GROUP' },
@@ -55,11 +53,13 @@ const CSS_SIGNATURES = [
     { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' }
 ];
 
+// ── VALID WIDGET TYPE IDs ────────────────────────────────────────────────────
+const VALID_TYPE_IDS = new Set(Object.keys(WidgetTypeConstants).map(Number));
+
 class WidgetDetector {
 
     /**
-     * Identify widget type from a config object (API response).
-     * Supports: widget_type_id (int), type (int or string name).
+     * Identify widget type from a config object (API response or test config).
      */
     static identify(config) {
         if (!config) return 'Unknown';
@@ -67,20 +67,14 @@ class WidgetDetector {
         const raw = config.widget_type_id ?? config.type;
         if (raw === null || raw === undefined) return 'Unknown';
 
-        // FIX: Explicit numeric parse — no implicit JS coercion
         const numericId = typeof raw === 'number' ? raw : parseInt(raw, 10);
         if (!isNaN(numericId) && WidgetTypeConstants[numericId]) {
             return WidgetTypeConstants[numericId];
         }
 
-        // String name resolution
         if (typeof raw === 'string') {
             const normalized = raw.toLowerCase().replace(/[_\- ]/g, '');
-
-            // Direct alias lookup (covers frontend terms like 'strip_slider')
             if (WidgetAliases[normalized]) return WidgetAliases[normalized];
-
-            // Check against constant values (e.g. 'CAROUSEL_SLIDER')
             const upperRaw = raw.toUpperCase().replace(/[- ]/g, '_');
             if (WidgetTypeNames[upperRaw] !== undefined) return upperRaw;
         }
@@ -89,18 +83,84 @@ class WidgetDetector {
     }
 
     /**
+     * Extract widget type SAFELY from a single parsed network JSON object.
+     */
+    static extractFromNetworkPayload(json) {
+        if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+
+        const preferredRaw = json.widget_type_id ?? json.widget_type ?? null;
+        if (preferredRaw !== null && preferredRaw !== undefined) {
+            const numericId = typeof preferredRaw === 'number' ? preferredRaw : parseInt(preferredRaw, 10);
+            if (!isNaN(numericId) && VALID_TYPE_IDS.has(numericId)) {
+                const typeName = WidgetTypeConstants[numericId];
+                const uid = json.unique_widget_id || json.unique_id || null;
+                return { typeName, typeId: numericId, uniqueWidgetId: uid };
+            }
+        }
+
+        const rawType = json.type;
+        if (rawType !== null && rawType !== undefined) {
+            const numericType = typeof rawType === 'number' ? rawType : parseInt(rawType, 10);
+            if (!isNaN(numericType) && VALID_TYPE_IDS.has(numericType)) {
+                const typeName = WidgetTypeConstants[numericType];
+                const uid = json.unique_widget_id || json.unique_id || null;
+                return { typeName, typeId: numericType, uniqueWidgetId: uid };
+            }
+
+            if (typeof rawType === 'string') {
+                const resolved = WidgetDetector.identify({ type: rawType });
+                if (resolved !== 'Unknown') {
+                    const uid = json.unique_widget_id || json.unique_id || null;
+                    return { typeName: resolved, typeId: WidgetTypeNames[resolved] ?? null, uniqueWidgetId: uid };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Recursively search a JSON tree for widget type payloads.
+     */
+    static collectFromNestedPayload(obj, results = [], depth = 0) {
+        if (!obj || typeof obj !== 'object' || depth > 10) return results;
+
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                WidgetDetector.collectFromNestedPayload(item, results, depth + 1);
+            }
+            return results;
+        }
+
+        const extracted = WidgetDetector.extractFromNetworkPayload(obj);
+        if (extracted) results.push(extracted);
+
+        const SKIP_KEYS = new Set(['font', 'dark_mode_colors', 'cta_attributes', 'widget_customization_meta']);
+        for (const key of Object.keys(obj)) {
+            if (SKIP_KEYS.has(key)) continue;
+            const val = obj[key];
+            if (val && typeof val === 'object') {
+                try {
+                    WidgetDetector.collectFromNestedPayload(val, results, depth + 1);
+                } catch (e) { }
+            }
+        }
+
+        return results;
+    }
+
+    /**
      * Discover widget type from a live Playwright locator.
-     * Priority: data attribute ID → data attribute name → CSS class signatures
-     * FIX: Explicit numeric parse, timeout guard, word-boundary CSS matching, SINGLE_SLIDER added
      */
     static async discover(locator, networkMap = {}) {
         if (!locator) return 'Unknown';
 
         let info = null;
-
         try {
             info = await Promise.race([
                 locator.evaluate(async (el) => {
+                    let id = null;
+
                     const getAttr = (element) => {
                         return element.getAttribute('data-widget-type') ||
                             element.getAttribute('widget_type_id') ||
@@ -109,72 +169,82 @@ class WidgetDetector {
                             element.getAttribute('data-id');
                     };
 
-                    // 1. Search UPWARDS for any widget identifier
+                    // ── Path 1: Walk up DOM (including host elements) ──
                     let current = el;
-                    let id = null;
                     while (current && current !== document.body) {
                         id = getAttr(current);
                         if (id) break;
-                        current = current.parentElement;
+                        // For Shadow DOM piercing in reverse
+                        if (!current.parentElement && current.getRootNode()?.host) {
+                            current = current.getRootNode().host;
+                        } else {
+                            current = current.parentElement;
+                        }
                     }
 
-                    // 2. IFrame handling - if this is an iframe, check its content (if accessible)
-                    if (!id && el.tagName.toLowerCase() === 'iframe') {
-                        try {
-                            const doc = el.contentDocument || el.contentWindow.document;
-                            const innerWidget = doc.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id]');
-                            if (innerWidget) id = getAttr(innerWidget);
-                        } catch (e) { /* ignore cross-origin errors */ }
-                    }
-
-                    // 2.5 Shadow DOM handling
+                    // ── Path 2: Check children/shadows if not found ──
                     if (!id && el.shadowRoot) {
                         try {
-                            const shadowWidget = el.shadowRoot.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id], .feedspace-widget, .feedspace-element-feed-box-wrap');
+                            const shadowWidget = el.shadowRoot.querySelector('[data-widget-type], [widget_type_id], [unique_widget_id], [data-type], [data-feedspace-type], [data-id], .feedspace-widget');
                             if (shadowWidget) id = getAttr(shadowWidget);
                         } catch (e) { }
                     }
 
-                    // 3. Search DOWNWARDS if still not found
                     if (!id) {
                         const child = el.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id]');
                         if (child) id = getAttr(child);
                     }
 
-                    // 4. Anchor check: is this a Feedspace widget based on common inner box classes?
-                    const isFeedspaceAnchor = !!(
-                        el.querySelector('.feedspace-element-feed-box-wrap, .fe-review-card, .feedspace-element-inner, .feedspace-element-grid') ||
-                        el.classList.contains('feedspace-embed') ||
-                        el.classList.contains('feedspace-widget')
-                    );
+                    // ── Path 3: Iframe Content ──
+                    let rawHtml = el.innerHTML || '';
+                    if (el.tagName.toLowerCase() === 'iframe') {
+                        try {
+                            const doc = el.contentDocument || el.contentWindow.document;
+                            if (doc && doc.body) {
+                                rawHtml += ' ' + doc.body.innerHTML;
+                                if (!id) {
+                                    const innerWidget = doc.querySelector('[data-widget-type], [widget_type_id], [data-type], [data-feedspace-type], [data-id]');
+                                    if (innerWidget) id = getAttr(innerWidget);
+                                }
+                            }
+                        } catch (e) { }
+                    }
 
-                    // Collect classes for fallback
-                    const collectClasses = (element) => {
-                        const cls = (element.className && typeof element.className === 'string')
-                            ? element.className : '';
+                    if (el.shadowRoot) rawHtml += ' ' + el.shadowRoot.innerHTML;
+                    const htmlSnippet = rawHtml.toLowerCase().substring(0, 2000);
+
+                    const collectClasses = (element, depth = 0) => {
+                        if (!element || depth > 3) return '';
+                        let cls = (element.className && typeof element.className === 'string') ? element.className : '';
+                        
+                        // Recurse into children
+                        for (const child of element.children) {
+                            cls += ' ' + collectClasses(child, depth + 1);
+                        }
+                        
+                        // Recurse into Shadow DOM
+                        if (element.shadowRoot) {
+                            cls += ' ' + collectClasses(element.shadowRoot, depth + 1);
+                        }
+                        
                         return cls;
                     };
 
                     const ownClasses = collectClasses(el);
-                    const parentClasses = el.parentElement ? collectClasses(el.parentElement) : '';
-                    const childClasses = Array.from(el.children)
-                        .slice(0, 5)
-                        .map(c => collectClasses(c))
-                        .join(' ');
+                    const parentClasses = (el.parentElement || el.getRootNode()?.host) 
+                        ? (el.parentElement || el.getRootNode().host).className : '';
+                    const allClasses = `${parentClasses} ${ownClasses}`.toLowerCase().trim();
 
-                    const allClasses = `${parentClasses} ${ownClasses} ${childClasses}`.toLowerCase().trim();
-
-                    let rawHtml = el.innerHTML || '';
-                    if (el.shadowRoot) {
-                        rawHtml += ' ' + el.shadowRoot.innerHTML;
-                    }
-                    const htmlSnippet = rawHtml.toLowerCase().substring(0, 1500);
+                    const isFeedspaceAnchor = !!(
+                        allClasses.includes('feedspace-') ||
+                        allClasses.includes('fe-') ||
+                        el.hasAttribute('data-fs-processed') ||
+                        htmlSnippet.includes('feedspace')
+                    );
 
                     return { idAttr: id, allClasses, htmlSnippet, isFeedspaceAnchor };
                 }),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('locator.evaluate() timed out after 5s')), 5000)
-                )
+                new Promise((_, reject) => setTimeout(() => reject(new Error('locator.evaluate() timed out after 5s')), 5000))
             ]);
         } catch (e) {
             console.warn(`[WidgetDetector] discover() evaluation failed: ${e.message}`);
@@ -183,73 +253,48 @@ class WidgetDetector {
 
         if (!info) return 'Unknown';
 
-        // ── PRIORITY 1: ID Attribute (UUID Network Map, Numeric, or String) ──────
         if (info.idAttr !== null && info.idAttr !== undefined) {
-            // Priority 1A: Check if UUID matches our network intercept map
-            if (networkMap[info.idAttr]) {
-                return networkMap[info.idAttr];
-            }
-
+            if (networkMap[info.idAttr]) return networkMap[info.idAttr];
             const numericId = parseInt(info.idAttr, 10);
-            if (!isNaN(numericId) && WidgetTypeConstants[numericId]) {
-                return WidgetTypeConstants[numericId];
-            }
-
+            if (!isNaN(numericId) && WidgetTypeConstants[numericId]) return WidgetTypeConstants[numericId];
             const normalizedAttr = info.idAttr.toLowerCase().replace(/[_\- ]/g, '');
             if (WidgetAliases[normalizedAttr]) return WidgetAliases[normalizedAttr];
-
             const upperAttr = info.idAttr.toUpperCase().replace(/[- ]/g, '_');
             if (WidgetTypeNames[upperAttr] !== undefined) return upperAttr;
         }
 
-        // ── PRIORITY 2: CSS Signature Fallback ───────────────────────────────
         const hasClass = (classString, token) => {
+            if (!classString || !token) return false;
             return new RegExp(`(^|\\s)${token}(\\s|$)`).test(classString);
         };
 
         const classes = info.allClasses;
+        const SIGNATURES_ORDERED = [
+            ...CSS_SIGNATURES.filter(s => s.type === 'MASONRY'),
+            ...CSS_SIGNATURES.filter(s => s.type !== 'MASONRY')
+        ];
 
-        for (const signature of CSS_SIGNATURES) {
+        for (const signature of SIGNATURES_ORDERED) {
             for (const cls of signature.classes) {
-                if (hasClass(classes, cls)) {
-                    return signature.type;
-                }
+                if (hasClass(classes, cls)) return signature.type;
             }
         }
 
-        // ── PRIORITY 3: Anchor-Based Fallback (if it looks like Feedspace) ───
-        if (info.isFeedspaceAnchor) {
-            // If it's a Feedspace element but we don't know the type,
-            // guess based on common keywords in classes/html
-            const html = info.htmlSnippet;
-            if (html.includes('vertical-scroll') || html.includes('updown')) return 'MARQUEE_UPDOWN';
-            if (html.includes('horizontal-scroll') || html.includes('left-right')) return 'MARQUEE_LEFTRIGHT';
-            if (html.includes('carousel')) return 'CAROUSEL_SLIDER';
-            if (html.includes('strip-slider')) return 'MARQUEE_STRIPE';
-            if (html.includes('single-slider') || html.includes('single-review')) return 'SINGLE_SLIDER';
-
-            // Default anchor guess for scrolling widgets
-            return 'MARQUEE_UPDOWN';
-        }
-
-        // ── PRIORITY 4: HTML Snippet Fallback ────────────────────────────────
-        const html = info.htmlSnippet;
-        if (html.includes('feedspace-vertical-scroll') || html.includes('updown')) return 'MARQUEE_UPDOWN';
-        if (html.includes('feedspace-marque') || html.includes('strip-slider')) return 'MARQUEE_STRIPE';
-        if (html.includes('carousel')) return 'CAROUSEL_SLIDER';
-        if (html.includes('masonry')) return 'MASONRY';
-        if (html.includes('floating-toast') || html.includes('fe-toast')) return 'FLOATING_TOAST';
-        if (html.includes('horizontal-scroll') || html.includes('left-right')) return 'MARQUEE_LEFTRIGHT';
-        if (html.includes('single-slider') || html.includes('single-review')) return 'SINGLE_SLIDER';
-        if (html.includes('avatar-group')) return 'AVATAR_GROUP';
+        // ── STEP 3: HTML Snippet Fallback ────────────────────────────────
+        // If attributes and CSS classes fail, check the raw HTML for keywords.
+        const snippet = info.htmlSnippet;
+        if (snippet.includes('masonry')) return 'MASONRY';
+        if (snippet.includes('carousel')) return 'CAROUSEL_SLIDER';
+        if (snippet.includes('floating-toast') || snippet.includes('chat-bubble')) return 'FLOATING_TOAST';
+        if (snippet.includes('avatar-group')) return 'AVATAR_GROUP';
+        if (snippet.includes('strip-slider')) return 'MARQUEE_STRIPE';
+        if (snippet.includes('single-slider')) return 'SINGLE_SLIDER';
+        if (snippet.includes('marquee-updown')) return 'MARQUEE_UPDOWN';
+        if (snippet.includes('marquee-leftright')) return 'MARQUEE_LEFTRIGHT';
 
         return 'Unknown';
     }
 
-    /**
-     * Get the numeric type ID from a widget type name.
-     * Supports both backend and frontend (alias) names.
-     */
     static getTypeId(typeName) {
         if (!typeName) return null;
         const normalized = typeName.toLowerCase().replace(/[_\- ]/g, '');
@@ -257,10 +302,6 @@ class WidgetDetector {
         return WidgetTypeNames[resolved] ?? null;
     }
 
-    /**
-     * Check if two type strings refer to the same widget
-     * (handles backend/frontend alias equivalence).
-     */
     static isSameType(typeA, typeB) {
         const resolve = (t) => {
             if (!t) return null;
@@ -271,4 +312,4 @@ class WidgetDetector {
     }
 }
 
-module.exports = { WidgetDetector, WidgetTypeConstants, WidgetTypeNames, WidgetAliases };
+module.exports = { WidgetDetector, WidgetTypeConstants, WidgetTypeNames, WidgetAliases, VALID_TYPE_IDS };

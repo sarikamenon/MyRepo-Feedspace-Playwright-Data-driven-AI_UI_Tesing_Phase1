@@ -11,17 +11,15 @@ const AIEngine = require('./aiEngine');
 const ReportHelper = require('./reportHelper');
 const { WidgetDetector } = require('./widgetDetector');
 
-// FIX: All requires at top-level — never inside conditionals or loops
 const AvatarGroupHelper = require('./interactiveWidgets/avatarGroupHelper');
 const FloatingToastHelper = require('./interactiveWidgets/floatingToastHelper');
 const CarouselSliderHelper = require('./interactiveWidgets/carouselSliderHelper');
-const StripSliderHelper = require('./interactiveWidgets/stripSliderHelper');   // handles MARQUEE_STRIPE + SINGLE_SLIDER (same widget, frontend vs backend term)
+const StripSliderHelper = require('./interactiveWidgets/stripSliderHelper');   // handles MARQUEE_STRIPE + SINGLE_SLIDER
 const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper');
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
 
 // All Feedspace widget selectors — ordered from most specific to least specific
 const FEEDSPACE_SELECTORS = [
-    // Floating / Toast widgets (check first — they overlap other content)
     '.feedspace-floating-card',
     '.feedspace-toast',
     '.feedspace-floating-widget',
@@ -31,44 +29,29 @@ const FEEDSPACE_SELECTORS = [
     '.fe-floating-toast',
     '[class*="floating-toast"]',
     '[class*="chat-box"]',
-
-    // Avatar Group
     '.fe-feedspace-avatar-group-widget-wrap',
-
-    // Carousel
     '.feedspace-carousel-widget',
     '.testimonial-slider',
     '.carousel_slider',
-
-    // Strip Slider / Marquee Stripe (backend=MARQUEE_STRIPE, frontend=STRIP_SLIDER — same widget)
     '.feedspace-marque-main-wrap',
     '.feedspace-show-overlay',
     '[class*="feedspace-embed"]',
     '.strip-slider',
-
-    // Single Slider (move above horizontal/vertical to prevent overlap issues)
     '.feedspace-single-review-widget',
     '.feedspace-single-slider',
     '.single-slider',
-
-    // Horizontal / Vertical Marquee
     '.feedspace-element-horizontal-scroll-widget',
     '.feedspace-left-right-shadow',
     '.feedspace-vertical-scroll',
     '.feedspace-updown',
-
-    // Masonry
     '.fe-masonry',
     '.feedspace-masonry',
-
-    // Generic containers
     '#feedspace-widget-container',
     '.feedspace-widget',
     '.feedspace-elements-wrapper',
     'iframe[src*="feedspace.io"]',
     'div[id*="feedspace"]',
-
-    // Data attribute selectors (lowest priority — most generic)
+    '[data-fs-processed]',
     '[data-widget-type]',
     '[data-type]',
     '[widget_type_id]',
@@ -77,7 +60,6 @@ const FEEDSPACE_SELECTORS = [
 
 const SELECTOR_STRING = FEEDSPACE_SELECTORS.join(', ');
 
-// Elements to hide during screenshots (distractions)
 const DISTRACTION_SELECTORS = [
     '.trustpilot-widget',
     '[id*="trustpilot"]',
@@ -98,11 +80,11 @@ class PlaywrightHelper {
         this.reportHelper = new ReportHelper();
         this.config = null;
 
-        // FIX: Separate expected (from config API) vs detected (from live page)
-        this.expectedType = 'Unknown';   // What the API config says it should be
-        this.networkWidgetMap = {};      // Map of unique_widget_id (UUID) -> TypeName
-        this.widgetType = 'Unknown';     // What is actually found on the page
-        this.typeMatchResult = null;     // PASS/FAIL comparison between the two
+        this.expectedType = 'Unknown';   // Resolved from config API type field
+        this.networkWidgetMap = {};      // UUID → TypeName from network payloads
+        this.detectedNetworkTypes = new Set(); // All type names seen in network traffic
+        this.widgetType = 'Unknown';     // Final resolved type from live page
+        this.typeMatchResult = null;     // PASS/FAIL comparison result
 
         this.aiResults = null;
         this.movementVerification = null;
@@ -111,49 +93,96 @@ class PlaywrightHelper {
 
     /**
      * Navigate to URL with retry logic.
-     * FIX: expectedType set here, widgetType stays 'Unknown' until discovery.
+     *
+     * FIX — Network interception rewrite:
+     *  1. Only parse responses from Feedspace domains — NOT the main page.
+     *     The main page HTML/JS often contains generic "type" fields that are
+     *     not widget types (e.g. schema.org type, meta type, etc.)
+     *  2. Use WidgetDetector.collectFromNestedPayload() instead of the old
+     *     recursive collectAll() — this skips known cosmetic sub-objects
+     *     (font, dark_mode_colors, cta_attributes) and only accepts numeric
+     *     type IDs in the valid range 4–11.
+     *  3. The type match uses WidgetDetector.isSameType() instead of a bare
+     *     Set.has() call — this handles backend/frontend alias equivalence
+     *     (e.g. "MARQUEE_STRIPE" === "STRIP_SLIDER").
      */
     async init(url, widgetTypeId, config) {
         this.config = config || {};
 
-        // FIX: Store what config SAYS the widget should be — separately from what we discover
+        // Resolve expectedType from whatever the caller passes:
+        // widgetTypeId may be a numeric ID (e.g. 5) or a string name (e.g. "masonry")
         this.expectedType = WidgetDetector.identify({ type: widgetTypeId }) || 'Unknown';
-        this.widgetType = 'Unknown'; // will be updated after discover() runs on the real page
+        this.widgetType = 'Unknown';
 
-        console.log(`[PlaywrightHelper] Expected widget type from config: ${this.expectedType} (ID: ${widgetTypeId})`);
+        console.log(`[PlaywrightHelper] Expected widget type from config: ${this.expectedType} (raw: ${widgetTypeId})`);
 
-        // FIX: Listen to network responses to catch the widget loading payload directly
+        // ── Network interception ────────────────────────────────────────────
         this.page.on('response', async (response) => {
             try {
-                const url = response.url();
-                if (url.includes('feedspace') && response.status() === 200) {
-                    const contentType = response.headers()['content-type'] || '';
-                    if (contentType.includes('application/json') || contentType.includes('text/plain')) {
-                        const json = await response.json().catch(() => null);
-                        if (json && typeof json === 'object') {
-                            let typeId = null;
-                            let uuid = null;
-                            if (json.type !== undefined && (json.unique_widget_id || json.id)) {
-                                typeId = json.type;
-                                uuid = json.unique_widget_id || json.id;
-                            } else if (json.data && json.data.type !== undefined) {
-                                typeId = json.data.type;
-                                uuid = json.data.unique_widget_id || json.data.id;
-                            }
+                const responseUrl = response.url();
+                const status = response.status();
 
-                            if (typeId !== null) {
-                                const interceptedType = WidgetDetector.identify({ type: typeId });
-                                if (uuid) {
-                                    this.networkWidgetMap[uuid] = interceptedType;
-                                }
-                                console.log(`[PlaywrightHelper] 📡 Network Intercepted Type: ${interceptedType} (Raw ID: ${typeId}, UUID: ${uuid})`);
-                            }
+                // FIX: Only process Feedspace API responses.
+                // Explicitly exclude the main page URL — its HTML can contain
+                // arbitrary "type" fields that are not widget type IDs.
+                const isFeedspaceApi = responseUrl.includes('feedspace') &&
+                    responseUrl !== url;
+
+                if (!isFeedspaceApi) return;
+                if (status !== 200 && status !== 201) return;
+
+                // ── Fast path: type ID in query string ──
+                const urlTypeMatch = responseUrl.match(/[?&]widget_type_id=(\d+)/) ||
+                    responseUrl.match(/[?&]type=(\d+)/);
+                if (urlTypeMatch) {
+                    const t = parseInt(urlTypeMatch[1]);
+                    const interceptedType = WidgetDetector.identify({ type: t });
+                    if (interceptedType !== 'Unknown') {
+                        console.log(`[PlaywrightHelper] 📡 Network (URL param): ${interceptedType} (ID: ${t})`);
+                        this.detectedNetworkTypes.add(interceptedType);
+                    }
+                }
+
+                // ── Body parsing ──
+                let text = null;
+                try { text = await response.text(); } catch (e) { return; }
+                if (!text) return;
+
+                // ── JSON body ──
+                try {
+                    const json = JSON.parse(text);
+
+                    // Use the new safe collector — skips cosmetic sub-objects,
+                    // only accepts type IDs in VALID_TYPE_IDS (4–11)
+                    const results = WidgetDetector.collectFromNestedPayload(json);
+                    for (const { typeName, uniqueWidgetId } of results) {
+                        console.log(`[PlaywrightHelper] 📡 Network (JSON body): ${typeName}`);
+                        this.detectedNetworkTypes.add(typeName);
+
+                        if (uniqueWidgetId) {
+                            const uuidKey = String(uniqueWidgetId).trim().toLowerCase();
+                            this.networkWidgetMap[uuidKey] = typeName;
+                            this.networkWidgetMap['global_last_type'] = typeName;
+                        }
+                    }
+                } catch (jsonErr) {
+                    // ── Regex fallback on raw text ──
+                    // FIX: Only match the unambiguous field names to avoid false positives
+                    const typeRegex = /"?(?:widget_type_id|widget_type)"?\s*[:=]\s*["']?(\d+)["']?/g;
+                    let match;
+                    while ((match = typeRegex.exec(text)) !== null) {
+                        const t = parseInt(match[1]);
+                        const interceptedType = WidgetDetector.identify({ type: t });
+                        if (interceptedType !== 'Unknown') {
+                            console.log(`[PlaywrightHelper] 📡 Network (regex fallback): ${interceptedType} (ID: ${t})`);
+                            this.detectedNetworkTypes.add(interceptedType);
                         }
                     }
                 }
-            } catch (ignore) { /* Ignore response errors when page navigates away */ }
+            } catch (ignore) { /* Page navigated away — safe to ignore */ }
         });
 
+        // ── Navigation with retry ───────────────────────────────────────────
         let attempts = 0;
         const maxAttempts = 3;
 
@@ -165,7 +194,7 @@ class PlaywrightHelper {
                 const response = await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
                 if (response && response.status() >= 400) {
-                    throw new Error(`HTTP Error ${response.status()}: Page not accessible for URL: ${url}`);
+                    throw new Error(`HTTP Error ${response.status()}: ${url}`);
                 }
 
                 const isSoft404 = await this.page.evaluate(() => {
@@ -176,40 +205,90 @@ class PlaywrightHelper {
                 }).catch(() => false);
 
                 if (isSoft404) {
-                    throw new Error(`Page Soft-404 Error: The requested page is not available at ${url}`);
+                    throw new Error(`Page Soft-404 at ${url}`);
                 }
 
                 await this.page.waitForLoadState('load', { timeout: 30000 }).catch(() => {
-                    console.log('[PlaywrightHelper] "load" event timed out — proceeding.');
+                    console.log('[PlaywrightHelper] "load" timed out — proceeding.');
                 });
 
-                // Wait extra for JS-injected widgets (Feedspace injects via embed.js)
                 await this._waitForFeedspaceScript().catch(() => {
-                    console.log('[PlaywrightHelper] Feedspace embed script not detected in time — proceeding.');
+                    console.log('[PlaywrightHelper] Feedspace embed script not detected — proceeding.');
                 });
 
-                return; // success
+                return;
 
             } catch (error) {
-                console.error(`[PlaywrightHelper] Navigation Error (Attempt ${attempts}): ${error.message}`);
+                console.error(`[PlaywrightHelper] Navigation error (Attempt ${attempts}): ${error.message}`);
                 if (attempts >= maxAttempts) throw error;
                 await this._sleep(5000);
             }
         }
     }
 
-    /**
-     * Wait for Feedspace embed script to load and execute.
-     * Fixes JS-injected widget detection issue.
-     */
     async _waitForFeedspaceScript() {
-        // Wait for the embed script response
-        await this.page.waitForResponse(
-            response => response.url().includes('feedspace.io') && response.status() === 200,
-            { timeout: 15000 }
-        );
-        // Give JS a moment to render the widget into DOM
-        await this._sleep(2000);
+        console.log('[PlaywrightHelper] Waiting for Feedspace script to manifest (up to 45s)...');
+        
+        // --- SMART SCROLL FALLBACK ---
+        // Trigger lazy-loaded scripts by scrolling the page early.
+        await this._smartScroll();
+
+        const startTime = Date.now();
+        let found = false;
+
+        // 1. Wait for either a network response OR the script tag to appear in DOM
+        while (Date.now() - startTime < 45000) {
+            // Check network state
+            const networkHit = this.detectedNetworkTypes.size > 0;
+            
+            // Check DOM state
+            const scriptTag = await this.page.evaluate(() => {
+                return !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"], .feedspace-embed');
+            }).catch(() => false);
+
+            if (networkHit || scriptTag) {
+                console.log(`[PlaywrightHelper] Feedspace signature detected (${networkHit ? 'Network' : 'DOM'}).`);
+                found = true;
+                break;
+            }
+            await this._sleep(2000);
+        }
+        
+        if (!found) {
+            console.warn('[PlaywrightHelper] ⚠️ No explicit Feedspace activity seen in 45s — proceeding with stabilization.');
+        }
+
+        // 2. Mandatory stability sleep to allow the script to execute and render the widget
+        console.log('[PlaywrightHelper] Stabilizing for 10s...');
+        await this._sleep(10000);
+    }
+
+    /**
+     * Smart scroll to trigger lazy-loaded items across the entire page height.
+     */
+    async _smartScroll() {
+        if (this.page.isClosed()) return;
+        console.log('[PlaywrightHelper] Executing smart scroll to trigger lazy loading...');
+        try {
+            await this.page.evaluate(async () => {
+                const scrollStep = 800;
+                const delay = 300;
+                const totalHeight = document.body.scrollHeight;
+                let currentPos = 0;
+                
+                while (currentPos < totalHeight) {
+                    window.scrollBy(0, scrollStep);
+                    currentPos += scrollStep;
+                    await new Promise(r => setTimeout(r, delay));
+                }
+                
+                // Jump back to top
+                window.scrollTo(0, 0);
+                await new Promise(r => setTimeout(r, 500));
+            });
+        } catch (e) {
+            console.warn(`[PlaywrightHelper] Smart scroll failed: ${e.message}`);
+        }
     }
 
     /**
@@ -218,9 +297,7 @@ class PlaywrightHelper {
     async validateWithAI(staticFeatures) {
         console.log(`[PlaywrightHelper] Starting widget discovery — expecting: ${this.expectedType}`);
 
-        // FIX: Guard page closed before any DOM interaction
         if (this.page.isClosed()) {
-            console.error('[PlaywrightHelper] Page is closed — cannot validate.');
             return this._buildErrorResult('Page closed before validation');
         }
 
@@ -228,12 +305,12 @@ class PlaywrightHelper {
         let screenshotBuffers = [];
 
         try {
-            // ── STEP 1: Wait for any widget marker to appear ─────────────────
+            // ── STEP 1: Wait for any widget marker ───────────────────────────
             await this.page.waitForSelector(SELECTOR_STRING, {
                 state: 'attached',
                 timeout: 30000
             }).catch(() => {
-                console.warn('[PlaywrightHelper] Timeout waiting for widget — widget may not be on this page.');
+                console.warn('[PlaywrightHelper] Timeout waiting for widget selector.');
             });
 
             const allMatches = this.page.locator(SELECTOR_STRING);
@@ -242,81 +319,151 @@ class PlaywrightHelper {
             if (count === 0) {
                 console.warn('[PlaywrightHelper] No Feedspace widget found on page.');
                 this.widgetType = 'Widget Not Found';
-
-                // FIX: Record type mismatch explicitly
                 this.typeMatchResult = {
                     expected: this.expectedType,
                     detected: 'Widget Not Found',
                     matched: false,
-                    reason: 'No Feedspace widget selectors found on the page — widget may not be embedded or is loaded in an iframe'
+                    reason: 'No Feedspace widget selectors matched on the page'
                 };
 
-                // FIX: Guard page closed before screenshot
                 if (!this.page.isClosed()) {
                     screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
                 }
-
                 return this._finalizeAnalysis(screenshotBuffers, staticFeatures);
             }
 
-            console.log(`[PlaywrightHelper] Found ${count} candidate(s) — scanning for type: ${this.expectedType}`);
+            console.log(`[PlaywrightHelper] Found ${count} candidate(s)`);
 
-            // ── STEP 2: Precision scan — find element matching expected type ──
-            const candidates = await allMatches.all();
+            // ── STEP 2: Shadow DOM pierce scan ───────────────────────────────
+            const candidatesFound = await this.page.evaluate((selString) => {
+                const results = [];
+                const visited = new Set();
+                const pierceShadow = (root) => {
+                    if (!root) return;
+                    root.querySelectorAll(selString).forEach(el => {
+                        if (!visited.has(el)) {
+                            visited.add(el);
+                            
+                            // Ensure element has a way to be identified in the main loop
+                            let id = el.id || el.getAttribute('unique_widget_id') ||
+                                     el.getAttribute('data-id') ||
+                                     el.getAttribute('data-widget-type');
+                            
+                            let isTemp = false;
+                            if (!id) {
+                                id = 'fs_temp_' + Math.random().toString(36).substr(2, 9);
+                                el.setAttribute('data-fs-temp-id', id);
+                                isTemp = true;
+                            }
+
+                            results.push({
+                                className: el.className,
+                                id: id,
+                                isTemp: isTemp
+                            });
+                        }
+                    });
+                    root.querySelectorAll('*').forEach(el => {
+                        if (el.shadowRoot) pierceShadow(el.shadowRoot);
+                    });
+                };
+                pierceShadow(document);
+                return results;
+            }, SELECTOR_STRING);
+
             let detectedType = 'Unknown';
 
-            for (const candidate of candidates) {
-                // Pass networkWidgetMap to discover so it can map DOM UUIDs to Network Types
-                const discovered = await WidgetDetector.discover(candidate, this.networkWidgetMap);
-                console.log(`[PlaywrightHelper] Candidate discovered as: ${discovered}`);
+            for (const cInfo of candidatesFound) {
+                const selector = cInfo.isTemp 
+                    ? `[data-fs-temp-id="${cInfo.id}"]`
+                    : `[id="${cInfo.id}"], [unique_widget_id="${cInfo.id}"], [data-id="${cInfo.id}"], [data-widget-type="${cInfo.id}"]`;
+                
+                const candLocator = selector ? this.page.locator(selector).first() : null;
 
-                // FIX: Use isSameType() to handle backend/frontend alias equivalence
-                if (WidgetDetector.isSameType(discovered, this.expectedType)) {
-                    locator = candidate;
-                    detectedType = discovered;
-                    console.log(`[PlaywrightHelper] ✅ PRECISION MATCH: ${discovered} matches expected ${this.expectedType}`);
-                    break;
+                if (candLocator) {
+                    const discovered = await WidgetDetector.discover(candLocator, this.networkWidgetMap);
+                    if (discovered !== 'Unknown') {
+                        if (WidgetDetector.isSameType(discovered, this.expectedType)) {
+                            locator = candLocator;
+                            detectedType = discovered;
+                            break;
+                        }
+                    }
                 }
             }
 
-            // ── STEP 3: Fallback — first visible, then first attached ─────────
+            // ── STEP 3: Fallback — visible, then first ────────────────────────
             if (!locator) {
-                console.log(`[PlaywrightHelper] No precise match for ${this.expectedType} — falling back...`);
-
-                for (const candidate of candidates) {
+                const candidateLocators = await allMatches.all();
+                for (const candidate of candidateLocators) {
                     const discovered = await WidgetDetector.discover(candidate, this.networkWidgetMap);
-                    if (await candidate.isVisible().catch(() => false)) {
+                    if (discovered !== 'Unknown' && await candidate.isVisible().catch(() => false)) {
                         locator = candidate;
                         detectedType = discovered;
-                        console.log(`[PlaywrightHelper] ⚠️ Fallback: Using first visible widget (${discovered})`);
+                        console.log(`[PlaywrightHelper] ⚠️ Fallback: Using visible widget (${discovered})`);
                         break;
                     }
                 }
 
-                if (!locator) {
+                if (!locator && count > 0) {
                     locator = allMatches.first();
                     detectedType = await WidgetDetector.discover(locator, this.networkWidgetMap);
-                    console.log(`[PlaywrightHelper] ⚠️ Fallback: Using first attached widget (${detectedType})`);
+                    console.log(`[PlaywrightHelper] ⚠️ Fallback: Using first element (${detectedType})`);
                 }
             }
 
-            // FIX: Now update widgetType from actual page discovery
-            this.widgetType = detectedType !== 'Unknown' ? detectedType : this.expectedType;
+            // ── STEP 4: Type matching — network is source of truth ────────────
+            //
+            // FIX: Use isSameType() instead of Set.has() for the network match check.
+            // This handles backend/frontend alias equivalence — e.g. if the network
+            // returns MARQUEE_STRIPE but expectedType is STRIP_SLIDER, that is a match.
+            let isNetworkMatched = this._networkHasType(this.expectedType);
 
-            // FIX: Record explicit PASS/FAIL for type match — goes into report
+            if (!isNetworkMatched) {
+                console.log(`[PlaywrightHelper] ${this.expectedType} not seen yet in network — polling for up to 15s...`);
+                for (let i = 0; i < 30; i++) { // 30 * 500ms = 15s
+                    await this._sleep(500);
+                    isNetworkMatched = this._networkHasType(this.expectedType);
+                    if (isNetworkMatched) {
+                        console.log(`[PlaywrightHelper] 📡 Network hit detected for ${this.expectedType} during polling.`);
+                        break;
+                    }
+                }
+            }
+
+            // Final type resolution
+            const isDomMatched = detectedType !== 'Unknown' && WidgetDetector.isSameType(detectedType, this.expectedType);
+            
+            if (isNetworkMatched) {
+                this.widgetType = this.expectedType;
+            } else if (isDomMatched) {
+                this.widgetType = detectedType;
+            } else if (detectedType !== 'Unknown') {
+                this.widgetType = detectedType;
+            } else {
+                this.widgetType = 'Unknown';
+            }
+
+            const isMatched = isNetworkMatched || isDomMatched;
+
             this.typeMatchResult = {
                 expected: this.expectedType,
                 detected: detectedType,
-                matched: WidgetDetector.isSameType(detectedType, this.expectedType),
-                reason: WidgetDetector.isSameType(detectedType, this.expectedType)
-                    ? 'Widget type on page matches config'
-                    : `Config says ${this.expectedType} but page has ${detectedType}`
+                matched: isMatched,
+                reason: isNetworkMatched
+                    ? `Widget type ${this.expectedType} confirmed via network interception`
+                    : isDomMatched
+                        ? `Widget type ${this.expectedType} confirmed via DOM analysis (Network intercept missing)`
+                        : `Config expects ${this.expectedType} but it was not found in any network response. Detected from DOM: ${detectedType}`
             };
 
-            console.log(`[PlaywrightHelper] Type match result: ${this.typeMatchResult.matched ? '✅ PASS' : '❌ FAIL'} — ${this.typeMatchResult.reason}`);
+            console.log(`[PlaywrightHelper] Type match: ${this.typeMatchResult.matched ? '✅ PASS' : '❌ FAIL'} — ${this.typeMatchResult.reason}`);
 
-            // ── STEP 4: Prepare viewport & hide distractions ──────────────────
-            // FIX: Guard page closed
+            if (isNetworkMatched && !WidgetDetector.isSameType(detectedType, this.expectedType)) {
+                console.log(`[PlaywrightHelper] Network confirmed ${this.expectedType}; DOM returned ${detectedType} — using network as source of truth`);
+            }
+
+            // ── STEP 5: Viewport & distraction cleanup ───────────────────────
             if (this.page.isClosed()) return this._buildErrorResult('Page closed during setup');
 
             await this.page.setViewportSize({ width: 1920, height: 1080 });
@@ -325,31 +472,44 @@ class PlaywrightHelper {
                 selectors.forEach(sel => {
                     try {
                         document.querySelectorAll(sel).forEach(el => {
-                            const cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
-                            // Never hide Feedspace elements themselves
+                            const cls = (el.className && typeof el.className === 'string')
+                                ? el.className.toLowerCase() : '';
                             if (!cls.includes('fe-') && !cls.includes('feedspace')) {
                                 el.style.setProperty('display', 'none', 'important');
                             }
                         });
-                    } catch (e) { /* ignore per-element errors */ }
+                    } catch (e) { }
                 });
             }, DISTRACTION_SELECTORS);
 
-            // ── STEP 5: Scroll to widget ──────────────────────────────────────
             const normalizedType = this.widgetType.toUpperCase();
 
             if (normalizedType !== 'FLOATING_TOAST') {
                 await this.slowScrollToFind();
             }
 
-            await locator.scrollIntoViewIfNeeded().catch(() => { });
+            if (locator) {
+                // Visibility guard: Wait up to 10s for the element to be visible
+                await locator.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {
+                    console.warn(`[PlaywrightHelper] Widget locator reached but not visible after 10s.`);
+                });
+                
+                await locator.scrollIntoViewIfNeeded().catch(() => { });
+                await this._sleep(1000);
+
+                // For floating cards that pop up, give them one more half-second if size is 0
+                let box = await locator.boundingBox().catch(() => null);
+                if (!box || box.width === 0 || box.height === 0) {
+                    console.log('[PlaywrightHelper] Widget size 0x0 — waiting 2s more for animation...');
+                    await this._sleep(2000);
+                }
+            }
             await this._sleep(1000);
 
-            // ── STEP 6: Widget-specific interaction & screenshot capture ───────
+            // ── STEP 6: Widget-specific interaction ──────────────────────────
             const box = await locator.boundingBox().catch(() => null);
             console.log(`[PlaywrightHelper] Widget bounds: ${box ? `${Math.round(box.width)}x${Math.round(box.height)}` : 'Unknown'}`);
 
-            // Resolve iframe context if needed
             let interactionContext = this.page;
             const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
             if (tagName === 'iframe') {
@@ -360,10 +520,8 @@ class PlaywrightHelper {
                 }
             }
 
-            // Dispatch to correct interaction helper
-            // NOTE: MARQUEE_STRIPE (backend) === STRIP_SLIDER (frontend) — both use StripSliderHelper
             if (normalizedType === 'AVATAR_GROUP') {
-                const interactiveShots = await AvatarGroupHelper.interact(
+                const shots = await AvatarGroupHelper.interact(
                     interactionContext, locator,
                     async () => {
                         const popup = interactionContext
@@ -376,23 +534,23 @@ class PlaywrightHelper {
                             : null;
                     }
                 );
-                if (interactiveShots?.length > 0) screenshotBuffers.push(...interactiveShots.filter(Boolean));
+                if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
 
             } else if (normalizedType === 'FLOATING_TOAST') {
-                const interactiveShots = await FloatingToastHelper.interact(interactionContext, locator);
-                if (interactiveShots?.length > 0) screenshotBuffers.push(...interactiveShots);
+                const shots = await FloatingToastHelper.interact(interactionContext, locator);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'CAROUSEL_SLIDER') {
-                const interactiveShots = await CarouselSliderHelper.interact(interactionContext, locator);
-                if (interactiveShots?.length > 0) screenshotBuffers.push(...interactiveShots);
+                const shots = await CarouselSliderHelper.interact(interactionContext, locator);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (
-                normalizedType === 'MARQUEE_STRIPE' ||   // backend term
-                normalizedType === 'STRIP_SLIDER' ||     // frontend alias
-                normalizedType === 'SINGLE_SLIDER'       // adjacent type — same helper
+                normalizedType === 'MARQUEE_STRIPE' ||
+                normalizedType === 'STRIP_SLIDER' ||
+                normalizedType === 'SINGLE_SLIDER'
             ) {
-                const interactiveShots = await StripSliderHelper.interact(interactionContext, locator);
-                if (interactiveShots?.length > 0) screenshotBuffers.push(...interactiveShots);
+                const shots = await StripSliderHelper.interact(interactionContext, locator);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'MARQUEE_UPDOWN') {
                 const { result, screenshots } = await VerticalScrollHelper.interact(
@@ -410,23 +568,25 @@ class PlaywrightHelper {
             }
 
             // ── STEP 7: Ensure at least one focused shot ──────────────────────
-            if (screenshotBuffers.length === 0) {
-                screenshotBuffers.push(await locator.screenshot({ animations: 'disabled' }));
+            if (screenshotBuffers.length === 0 && locator) {
+                const box = await locator.boundingBox().catch(() => null);
+                if (box && box.width > 0 && box.height > 0) {
+                    screenshotBuffers.push(await locator.screenshot({ animations: 'disabled' }));
+                } else {
+                    console.warn('[PlaywrightHelper] Skipping focused screenshot: Widget has zero/null dimensions.');
+                }
             }
 
-            // ── STEP 8: Full page context screenshot for AI ───────────────────
-            // FIX: Guard page closed before final screenshot
+            // ── STEP 8: Full-page context screenshot for AI ───────────────────
             if (!this.page.isClosed()) {
-                console.log('[PlaywrightHelper] Capturing full page context for AI...');
-                screenshotBuffers.push(
-                    await this.page.screenshot({ fullPage: true, animations: 'disabled' })
-                );
+                const fullPageScreenshot = await this.page.screenshot({ fullPage: true, animations: 'disabled' });
+                if (fullPageScreenshot) {
+                    screenshotBuffers.push(fullPageScreenshot);
+                }
             }
 
         } catch (error) {
             console.error('[PlaywrightHelper] Validation error:', error.message);
-
-            // FIX: Guard page closed before fallback screenshot
             if (screenshotBuffers.length === 0 && !this.page.isClosed()) {
                 try {
                     screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
@@ -440,8 +600,19 @@ class PlaywrightHelper {
     }
 
     /**
+     * Check if any of the network-detected types is the same as the target.
+     * FIX: Uses isSameType() instead of Set.has() so that backend/frontend
+     * alias pairs (MARQUEE_STRIPE / STRIP_SLIDER) are treated as equal.
+     */
+    _networkHasType(targetType) {
+        for (const detected of this.detectedNetworkTypes) {
+            if (WidgetDetector.isSameType(detected, targetType)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Human-like smooth scroll to help lazy-loaded widgets appear.
-     * FIX: page.isClosed() guard at start.
      */
     async slowScrollToFind() {
         if (this.page.isClosed()) return;
@@ -462,29 +633,37 @@ class PlaywrightHelper {
     }
 
     /**
-     * Save screenshots and run AI analysis.
-     * FIX: typeMatchResult is now included in the final output.
+     * Save screenshots and run AI analysis — with Guardrails.
      */
     async _finalizeAnalysis(screenshotBuffers, staticFeatures) {
         const timestamp = Date.now();
         const screenshotDir = path.join(process.cwd(), 'screenshots');
         if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
 
+        // --- GUARDRAIL CHECK ---
+        // If we have no screenshots, or the type is Unknown and we found no markers, 
+        // we should not bother the AI.
+        // NOTE: If we HAVE a network match, we should NOT abort, even if focused visual is missing.
+        const isDetectionFailure = (this.widgetType === 'Unknown' || this.widgetType === 'Widget Not Found') && !this.typeMatchResult?.matched;
+        const hasNoVisuals = screenshotBuffers.length === 0 || !screenshotBuffers.some(b => b && b.length > 0);
+
+        if (isDetectionFailure && hasNoVisuals) {
+            console.error(`[PlaywrightHelper] 🛑 Aborting AI analysis: Widget not detected AND no visuals available.`);
+            return this._buildErrorResult('Automation could not locate the widget and no screenshots were captured.');
+        }
+
         const savedPaths = [];
-
         for (let i = 0; i < screenshotBuffers.length; i++) {
-            if (!screenshotBuffers[i]) continue; // skip null buffers
-
+            if (!screenshotBuffers[i]) continue;
             const suffix = screenshotBuffers.length > 1 ? `_part${i + 1}` : '';
-            // FIX: Use expectedType in filename so it's always meaningful, even if discovery failed
-            const label = this.widgetType !== 'Unknown' ? this.widgetType : this.expectedType;
+            const label = this.widgetType !== 'Unknown' ? this.widgetType : 'DETECTION_FAIL';
             const screenshotPath = path.join(screenshotDir, `${label}_${timestamp}${suffix}.png`);
-
             fs.writeFileSync(screenshotPath, screenshotBuffers[i]);
             savedPaths.push(screenshotPath);
             console.log(`[PlaywrightHelper] Screenshot saved: ${screenshotPath}`);
         }
 
+        // Only proceed to AI if we actually found something
         this.aiResults = await this.aiEngine.analyzeScreenshot(
             screenshotBuffers.filter(Boolean),
             this.config,
@@ -492,12 +671,11 @@ class PlaywrightHelper {
             staticFeatures
         );
 
-        // Append movement verification result to AI feature results
+        // Append movement verification
         if (this.movementVerification && this.aiResults?.feature_results) {
             const isUpdown = this.widgetType.toUpperCase().includes('UPDOWN');
             const featureName = isUpdown ? 'Cross Scroll Animation' : 'Horizontal Scrolling Animation';
-            const status = this.movementVerification.status; // PASS | FAIL | ERROR | UNKNOWN
-
+            const status = this.movementVerification.status;
             this.aiResults.feature_results.push({
                 feature: featureName,
                 ui_status: status === 'PASS' ? 'Visible' : 'Absent',
@@ -505,13 +683,12 @@ class PlaywrightHelper {
                 scenario: this.movementVerification.message,
                 status: (status === 'ERROR' || status === 'UNKNOWN') ? 'FAIL' : status
             });
-
             if (status === 'FAIL' || status === 'ERROR') {
                 this.aiResults.overall_status = 'FAIL';
             }
         }
 
-        // FIX: Append type match result as a feature — now visible in report
+        // Prepend type match as a feature result
         if (this.aiResults?.feature_results && this.typeMatchResult) {
             this.aiResults.feature_results.unshift({
                 feature: 'Widget Type Identification',
@@ -520,16 +697,15 @@ class PlaywrightHelper {
                 scenario: this.typeMatchResult.reason,
                 status: this.typeMatchResult.matched ? 'PASS' : 'FAIL'
             });
-
             if (!this.typeMatchResult.matched) {
                 this.aiResults.overall_status = 'FAIL';
             }
         }
 
         return {
-            expectedType: this.expectedType,          // from config API
-            widgetType: this.widgetType,              // from live page discovery
-            typeMatchResult: this.typeMatchResult,    // PASS/FAIL comparison
+            expectedType: this.expectedType,
+            widgetType: this.widgetType,
+            typeMatchResult: this.typeMatchResult,
             capturedConfig: this.config,
             aiAnalysis: this.aiResults,
             movementVerification: this.movementVerification,
@@ -538,23 +714,27 @@ class PlaywrightHelper {
         };
     }
 
-    /**
-     * Build a standardised error result when early exit is needed.
-     */
     _buildErrorResult(reason) {
         return {
             expectedType: this.expectedType,
-            widgetType: 'Error',
+            widgetType: 'TECHNICAL_FAILURE',
             typeMatchResult: {
                 expected: this.expectedType,
-                detected: 'Error',
+                detected: this.widgetType,
                 matched: false,
-                reason
+                reason: `Automation Guardrail: ${reason}`,
+                // Add this to debug if the network actually saw the widget
+                networkSawType: this._networkHasType(this.expectedType)
             },
-            capturedConfig: this.config,
-            aiAnalysis: null,
-            movementVerification: null,
-            screenshotPath: null,
+            aiAnalysis: {
+                overall_status: 'FAIL',
+                summary: `Test aborted: ${reason}`,
+                feature_results: [{
+                    feature: 'Automation Integrity',
+                    status: 'FAIL',
+                    scenario: reason
+                }]
+            },
             screenshotPaths: []
         };
     }
