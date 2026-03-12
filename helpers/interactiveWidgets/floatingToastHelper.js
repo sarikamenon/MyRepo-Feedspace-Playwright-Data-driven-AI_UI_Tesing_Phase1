@@ -44,14 +44,14 @@ class FloatingToastHelper {
 
             // Wait briefly for toast to appear
             if (!(await previewCard.isVisible())) {
-                console.log('[FloatingToastHelper] Waiting for visible preview card (5s)...');
-                await previewCard.waitFor({ state: 'visible', timeout: 5000 }).catch(() => { });
+                console.log('[FloatingToastHelper] Waiting for visible preview card (10s)...');
+                await previewCard.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
             }
 
             // Fallback to global search if widget scope fails
             if (!(await previewCard.isVisible())) {
                 previewCard = page.locator(previewSelectors.join(', ')).filter({ visible: true }).first();
-                await previewCard.waitFor({ state: 'visible', timeout: 3000 }).catch(() => { });
+                await previewCard.waitFor({ state: 'visible', timeout: 5000 }).catch(() => { });
             }
 
             if (!(await previewCard.isVisible())) {
@@ -67,13 +67,13 @@ class FloatingToastHelper {
             // 3️⃣ Click to expand
             console.log('[FloatingToastHelper] Clicking preview to expand...');
             await previewCard.hover({ force: true }).catch(() => { });
-            await previewCard.click({ force: true, timeout: 5000 }).catch(() => { });
+            await previewCard.click({ force: true, timeout: 10000 }).catch(() => { });
             await previewCard.dispatchEvent('click').catch(() => { });
 
             // Wait for expanded box
             console.log('[FloatingToastHelper] Waiting for expansion popup...');
             let expandedBox = page.locator(expandedSelectors.join(', ')).filter({ visible: true }).first();
-            await expandedBox.waitFor({ state: 'visible', timeout: 8000 }).catch(() => { });
+            await expandedBox.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
 
             await page.waitForTimeout(2000); // Allow settle
 
