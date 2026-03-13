@@ -1,148 +1,153 @@
 class AvatarGroupHelper {
     static async interact(page, widgetLocator, captureCallback) {
-        console.log('[AvatarGroupHelper] Starting refined interactive avatar clicking...');
+        console.log('[AvatarGroupHelper] Starting advanced shadow-aware interaction...');
 
         const screenshotBuffers = [];
 
-        // 0️⃣ REQUIREMENT: Capture 'avatars-only' focused screenshot before interactions
+        // 1️⃣ Find the "True" Widget Root and Tag it for discovery
+        const discoveryTempId = 'fs_root_' + Math.random().toString(36).substr(2, 9);
+        await widgetLocator.evaluate((el, id) => el.setAttribute('data-fs-discovery-root', id), discoveryTempId);
+        
+        const widgetRoot = await widgetLocator.evaluateHandle(el => {
+            if (el.shadowRoot) return el.shadowRoot;
+            if (el.querySelector('.feedspace-avatar-group, .feedspace-avatar-group-item')) return el;
+            return el.parentElement;
+        });
+
+        // 2️⃣ Capture 'avatars + aggregate stars' screenshot using Clip
         try {
-            console.log('[AvatarGroupHelper] Capturing focused avatars-only screenshot...');
+            console.log('[AvatarGroupHelper] Determining clip region for focused screenshot...');
             await widgetLocator.scrollIntoViewIfNeeded({ timeout: 3000 });
-            const avatarsOnlyBuffer = await widgetLocator.screenshot({ timeout: 5000 }).catch(() => null);
-            if (avatarsOnlyBuffer) {
-                screenshotBuffers.push(avatarsOnlyBuffer);
-                console.log('[AvatarGroupHelper] Avatars-only screenshot added to buffer.');
+            
+            const box = await widgetLocator.boundingBox();
+            if (box) {
+                // Broaden the clip to catch aggregate stars which are often above or below
+                const clip = {
+                    x: Math.max(0, box.x - 50),
+                    y: Math.max(0, box.y - 300), // Larger space above for stars (e.g. ESKK)
+                    width: box.width + 100,
+                    height: box.height + 400   // Generous space below for safety
+                };
+                console.log(`[AvatarGroupHelper] Taking clipped screenshot: ${JSON.stringify(clip)}`);
+                const buffer = await page.screenshot({ clip, animations: 'disabled' }).catch(() => null);
+                if (buffer) {
+                    screenshotBuffers.push(buffer);
+                    console.log('[AvatarGroupHelper] Aggregate/Avatar focused shot captured.');
+                }
             }
         } catch (e) {
-            console.warn(`[AvatarGroupHelper] Failed to capture focused avatar shot: ${e.message}`);
+            console.warn(`[AvatarGroupHelper] Clip screenshot failed: ${e.message}`);
         }
 
-        // Broad selectors to capture all potential avatar elements
+        // 3️⃣ Find Avatars (Shadow DFS)
         const avatarSelectors = [
-            '.fe-avatar-box',
-            '.large-avatar-box',
-            '.fe-avatar',
-            '[class*="avatar-box"]',
-            '[class*="avatar-item"]',
+            '.feedspace-avatar-group-item',
             '.feedspace-avatar',
-            'div:has(.feedspace-initials)',
+            '.fe-avatar-box',
+            '.fe-avatar',
+            '[class*="avatar-item"]',
+            'div:has(.feedspace-initials)'
         ];
 
-        // Find all avatars inside the widget
-        const allCandidates = await widgetLocator.locator(avatarSelectors.join(', ')).all();
-        console.log(`[AvatarGroupHelper] Found ${allCandidates.length} potential avatar elements total.`);
+        const avatars = await page.evaluate(async ({ tempId, selectors }) => {
+            const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`) || 
+                         Array.from(document.querySelectorAll('*'))
+                              .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`))
+                              ?.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`);
+            
+            if (!root) return [];
 
-        // 1️⃣ Filter for VISIBLE and UNIQUE avatars
-        const visibleAvatars = [];
-        const seenFeedIds = new Set();
+            const results = [];
+            const visited = new Set();
 
-        for (const candidate of allCandidates) {
-            try {
-                if (await candidate.isVisible()) {
-                    const feedId = await candidate.getAttribute('data-feed-id').catch(() => null);
-
-                    if (feedId) {
-                        if (!seenFeedIds.has(feedId)) {
-                            seenFeedIds.add(feedId);
-                            visibleAvatars.push(candidate);
-                        }
-                    } else {
-                        // If no feedId, use a temporary unique identifier or just include if it seems distinct
-                        // For now, if no feedId, we treat it as potentially duplicate if it's very close to another
-                        visibleAvatars.push(candidate);
-                    }
-                }
-            } catch (e) { }
-
-            if (visibleAvatars.length >= 5) break;
-        }
-
-        console.log(`[AvatarGroupHelper] ${visibleAvatars.length} unique avatars are currently visible.`);
-
-        // Pick specific indices: 1st (0) and 3rd (2) as per requirement
-        const indicesToInteract = [];
-        if (visibleAvatars.length > 0) indicesToInteract.push(0);
-        if (visibleAvatars.length > 2) indicesToInteract.push(2);
-
-        for (let i = 0; i < indicesToInteract.length; i++) {
-            const index = indicesToInteract[i];
-            const avatar = visibleAvatars[index];
-
-            try {
-                console.log(`[AvatarGroupHelper] Processing visible avatar index ${index} (${i + 1}/${indicesToInteract.length})...`);
-
-                // 2️⃣ Reset State: Ensure previous popups are closed
-                const reviewBox = page.locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"], [class*="popup"], .fe-review-box-content');
-                const closeBtn = page.locator('.fe-review-box-close, .close-btn, [class*="close"], .fe-modal-close').filter({ visible: true }).first();
-
-                if (await reviewBox.first().isVisible()) {
-                    console.log('[AvatarGroupHelper] Closing existing popup by clicking outside...');
-                    // Click outside (top-left area usually safe)
-                    await page.mouse.click(20, 20);
-                    await page.waitForTimeout(500);
-
-                    // Fallback to close button if still visible
-                    if (await reviewBox.first().isVisible()) {
-                        await closeBtn.click().catch(() => null);
-                    }
-
-                    await reviewBox.first().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => null);
-                    await page.waitForTimeout(800);
-                }
-
-                // 3️⃣ Scroll and Click
-                try {
-                    await avatar.scrollIntoViewIfNeeded({ timeout: 3000 });
-                } catch (e) {
-                    await avatar.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
-                }
-                await page.waitForTimeout(500);
-
-                console.log(`[AvatarGroupHelper] Clicking visible avatar ${index + 1}...`);
-                const img = avatar.locator('img').first();
-                if (await img.count() && await img.isVisible()) {
-                    await img.click({ force: true, timeout: 3000 });
-                } else {
-                    await avatar.click({ force: true, timeout: 3000 });
-                }
-
-                // 4️⃣ Wait for the popup and capture
-                try {
-                    await reviewBox.first().waitFor({ state: 'visible', timeout: 6000 });
-                    console.log(`[AvatarGroupHelper] Review box revealed for avatar ${index + 1}.`);
-                } catch (e) {
-                    console.warn(`[AvatarGroupHelper] Popup did not appear for avatar ${index + 1}.`);
-                }
-
-                // Wait for content stabilization
-                await page.waitForTimeout(1500);
-
-                // Capture focused high-res screenshot
-                console.log(`[AvatarGroupHelper] Capturing screenshot for review ${index + 1}`);
-                const buffer = await captureCallback();
-                if (buffer) screenshotBuffers.push(buffer);
-
-                // 5️⃣ REQUIREMENT: Close the popup by clicking outside
-                console.log('[AvatarGroupHelper] Cleaning up: Closing popup by clicking outside...');
-                await page.mouse.click(20, 20);
-
-                // Wait until it's fully hidden before continuing
-                await reviewBox.first().waitFor({ state: 'hidden', timeout: 4000 }).catch(async () => {
-                    console.log('[AvatarGroupHelper] Click outside failed to close popup, using close button...');
-                    if (await closeBtn.isVisible()) {
-                        await closeBtn.click().catch(() => null);
-                        await reviewBox.first().waitFor({ state: 'hidden', timeout: 2000 }).catch(() => null);
-                    }
+            const findInRoot = (node) => {
+                if (!node) return;
+                
+                // Check current node
+                selectors.forEach(s => {
+                    try {
+                        const matches = node.querySelectorAll(s);
+                        matches.forEach(m => {
+                            if (!visited.has(m)) {
+                                visited.add(m);
+                                const box = m.getBoundingClientRect();
+                                if (box.width > 0 && box.height > 0) {
+                                    // Generate a temp ID for Playwright to find it
+                                    let id = m.getAttribute('data-fs-temp-id');
+                                    if (!id) {
+                                        id = 'fs_avatar_' + Math.random().toString(36).substr(2, 9);
+                                        m.setAttribute('data-fs-temp-id', id);
+                                    }
+                                    results.push({ id, feedId: m.getAttribute('data-feed-id') });
+                                }
+                            }
+                        });
+                    } catch(e){}
                 });
 
-                await page.waitForTimeout(1000); // Breathe between interactions
+                // Recurse into children
+                Array.from(node.children || []).forEach(child => {
+                    findInRoot(child);
+                    if (child.shadowRoot) findInRoot(child.shadowRoot);
+                });
+            };
 
+            findInRoot(root);
+            if (root.shadowRoot) findInRoot(root.shadowRoot);
+
+            return results;
+        }, { tempId: discoveryTempId, selectors: avatarSelectors });
+
+        console.log(`[AvatarGroupHelper] Found ${avatars.length} avatars in Shadow/DOM.`);
+
+        // 4️⃣ Interact with up to 5 unique avatars (User requested 5 if more than 10 exist)
+        const seenFeedIds = new Set();
+        const uniqueAvatars = avatars.filter(a => {
+            if (!a.feedId) return true;
+            if (seenFeedIds.has(a.feedId)) return false;
+            seenFeedIds.add(a.feedId);
+            return true;
+        });
+
+        const targets = uniqueAvatars.slice(0, 5); // Take up to 5 unique ones
+
+        console.log(`[AvatarGroupHelper] Selected ${targets.length} unique avatars for interaction.`);
+
+        for (let i = 0; i < targets.length; i++) {
+            const target = targets[i];
+            const selector = `[data-fs-temp-id="${target.id}"]`;
+
+            try {
+                console.log(`[AvatarGroupHelper] Clicking unique avatar ${i + 1}/${targets.length} (ID: ${target.id})...`);
+                
+                // Click via JS to ensure it pierces shadow boundaries reliably
+                await page.evaluate((sel) => {
+                    const el = document.querySelector(sel) || 
+                               Array.from(document.querySelectorAll('*'))
+                                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
+                                    ?.shadowRoot.querySelector(sel);
+                    if (el) {
+                        el.scrollIntoView({ block: 'center' });
+                        el.click();
+                    }
+                }, selector);
+
+                // Wait longer for popup to be stable and fully rendered
+                await page.waitForTimeout(3000); 
+
+                // Capture standard VIEWPORT for review cards to ensure the popup is centered and legible
+                console.log(`[AvatarGroupHelper] Capturing viewport screenshot for review card ${i + 1}...`);
+                const shot = await page.screenshot({ fullPage: false, animations: 'disabled' }).catch(() => null);
+                if (shot) screenshotBuffers.push(shot);
+
+                // Close popup by clicking away from common widget areas
+                await page.mouse.click(50, 50); 
+                await page.waitForTimeout(1000);
             } catch (err) {
-                console.warn(`[AvatarGroupHelper] Error during interaction ${index + 1}: ${err.message}`);
+                console.warn(`[AvatarGroupHelper] Failed to interact with avatar ${i + 1}: ${err.message}`);
             }
         }
 
-        console.log(`[AvatarGroupHelper] Interaction sequence complete. ${screenshotBuffers.length} shots captured.`);
         return screenshotBuffers;
     }
 }

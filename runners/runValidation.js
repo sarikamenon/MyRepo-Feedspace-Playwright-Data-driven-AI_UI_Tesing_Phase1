@@ -93,6 +93,7 @@ async function run() {
     for (let i = 0; i < testData.length; i++) {
         const entry = testData[i];
         const url = entry.customer_url || entry.url;
+        const widgetUUID = entry.unique_widget_id;
         const typeId = entry.widget_type || entry.type;
         const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
@@ -150,6 +151,7 @@ async function run() {
 
                 const record = {
                     url: url,
+                    widgetId: widgetUUID,
                     ...validationResult,
                     status: validationResult.aiAnalysis.overall_status || validationResult.aiAnalysis.status || 'UNKNOWN',
                     timestamp: new Date().toISOString()

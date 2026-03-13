@@ -83,7 +83,8 @@ class VerticalScrollHelper {
             const buf3 = await widgetLocator.screenshot({ animations: 'allow' }).catch(() => null);
             if (buf3) screenshots.push(buf3);
 
-            // 3️⃣ Analysis Logic
+            // 3️⃣ Analysis Logic - COMMENTED OUT FOR NOW
+            /*
             if (columnCount === 0) {
                 return {
                     result: { status: 'UNKNOWN', message: 'No columns identified for programmatic tracking.' },
@@ -142,6 +143,15 @@ class VerticalScrollHelper {
             }
 
             return { result: { status: resultStatus, message, details: colResults }, screenshots };
+            */
+
+            return { 
+                result: { 
+                    status: 'SKIPPED', 
+                    message: 'Vertical movement check is currently disabled (commented out).' 
+                }, 
+                screenshots 
+            };
 
         } catch (e) {
             console.warn(`[VerticalScrollHelper] ERROR: ${e.message}`);

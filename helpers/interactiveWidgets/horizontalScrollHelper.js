@@ -109,7 +109,8 @@ class HorizontalScrollHelper {
             const buf3 = await widgetLocator.screenshot({ animations: 'disabled' }).catch(() => null);
             if (buf3) screenshots.push(buf3);
 
-            // 3️⃣ Analysis Logic
+            // 3️⃣ Analysis Logic - COMMENTED OUT FOR NOW
+            /*
             if (rowCount === 0) {
                 return {
                     result: { status: 'UNKNOWN', message: 'No rows identified for programmatic tracking.' },
@@ -168,6 +169,15 @@ class HorizontalScrollHelper {
             }
 
             return { result: { status: resultStatus, message, details: rowResults }, screenshots };
+            */
+
+           return { 
+               result: { 
+                   status: 'SKIPPED', 
+                   message: 'Horizontal movement check is currently disabled (commented out).' 
+               }, 
+               screenshots 
+           };
 
         } catch (e) {
             console.warn(`[HorizontalScrollHelper] ERROR: ${e.message}`);

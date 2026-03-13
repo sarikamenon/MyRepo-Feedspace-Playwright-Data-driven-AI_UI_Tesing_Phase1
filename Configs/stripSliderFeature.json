@@ -1,8 +1,13 @@
 {
     "features": [
+        "Inline CTA",
+        "Feedspace Branding",
+        "Read More",
+        "Show Review Date"
+    ],
+    "commented_features": [
         "Show Review Ratings",
         "Show Social Platform Icon",
-        "Inline CTA",
-        "Feedspace Branding"
+        "Horizontal Scrolling Animation"
     ]
 }

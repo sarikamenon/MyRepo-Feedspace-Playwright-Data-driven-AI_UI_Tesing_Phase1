@@ -472,9 +472,12 @@ class PlaywrightHelper {
                 selectors.forEach(sel => {
                     try {
                         document.querySelectorAll(sel).forEach(el => {
-                            const cls = (el.className && typeof el.className === 'string')
-                                ? el.className.toLowerCase() : '';
-                            if (!cls.includes('fe-') && !cls.includes('feedspace')) {
+                            // High-risk: only hide if it's definitely a cookie banner or trustpilot
+                            const text = el.innerText ? el.innerText.toLowerCase() : '';
+                            const isCookie = text.includes('cookie') || text.includes('accept');
+                            const isTrustpilot = el.className && typeof el.className === 'string' && el.className.includes('trustpilot');
+                            
+                            if (isCookie || isTrustpilot) {
                                 el.style.setProperty('display', 'none', 'important');
                             }
                         });
@@ -489,20 +492,22 @@ class PlaywrightHelper {
             }
 
             if (locator) {
-                // Visibility guard: Wait up to 10s for the element to be visible
-                await locator.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {
-                    console.warn(`[PlaywrightHelper] Widget locator reached but not visible after 10s.`);
-                });
+                // Visibility guard: Wait up to 10s for the element to be visible and have dimensions
+                console.log(`[PlaywrightHelper] Waiting for widget dimensions to be > 0...`);
+                let box = await locator.boundingBox().catch(() => null);
+                let waitAttempts = 0;
+                while ((!box || box.height === 0) && waitAttempts < 10) {
+                    await this._sleep(1000);
+                    box = await locator.boundingBox().catch(() => null);
+                    waitAttempts++;
+                }
+
+                if (!box || box.height === 0) {
+                    console.warn(`[PlaywrightHelper] Widget locator reached but height is still 0 after 10s.`);
+                }
                 
                 await locator.scrollIntoViewIfNeeded().catch(() => { });
                 await this._sleep(1000);
-
-                // For floating cards that pop up, give them one more half-second if size is 0
-                let box = await locator.boundingBox().catch(() => null);
-                if (!box || box.width === 0 || box.height === 0) {
-                    console.log('[PlaywrightHelper] Widget size 0x0 — waiting 2s more for animation...');
-                    await this._sleep(2000);
-                }
             }
             await this._sleep(1000);
 
@@ -525,7 +530,7 @@ class PlaywrightHelper {
                     interactionContext, locator,
                     async () => {
                         const popup = interactionContext
-                            .locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"]')
+                            .locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"], .feedspace-avatar-tooltip, [class*="tooltip"], .fe-tooltip')
                             .filter({ visible: true })
                             .first();
                         if (await popup.isVisible()) return await popup.screenshot({ animations: 'disabled' });
@@ -676,15 +681,19 @@ class PlaywrightHelper {
             const isUpdown = this.widgetType.toUpperCase().includes('UPDOWN');
             const featureName = isUpdown ? 'Cross Scroll Animation' : 'Horizontal Scrolling Animation';
             const status = this.movementVerification.status;
-            this.aiResults.feature_results.push({
-                feature: featureName,
-                ui_status: status === 'PASS' ? 'Visible' : 'Absent',
-                config_status: 'Visible',
-                scenario: this.movementVerification.message,
-                status: (status === 'ERROR' || status === 'UNKNOWN') ? 'FAIL' : status
-            });
-            if (status === 'FAIL' || status === 'ERROR') {
-                this.aiResults.overall_status = 'FAIL';
+
+            // Only append if staticFeatures is not provided (legacy) or if it includes the feature
+            if (!staticFeatures || staticFeatures.includes(featureName)) {
+                this.aiResults.feature_results.push({
+                    feature: featureName,
+                    ui_status: status === 'PASS' ? 'Visible' : 'Absent',
+                    config_status: 'Visible',
+                    scenario: this.movementVerification.message,
+                    status: (status === 'ERROR' || status === 'UNKNOWN') ? 'FAIL' : status
+                });
+                if (status === 'FAIL' || status === 'ERROR') {
+                    this.aiResults.overall_status = 'FAIL';
+                }
             }
         }
 

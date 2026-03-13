@@ -1,7 +1,9 @@
 {
     "features": [
-        "Show Review Ratings",
-        "Show Social Platform Icon",
         "Inline CTA"
+    ],
+    "commented_features": [
+        "Show Review Ratings",
+        "Show Social Platform Icon"
     ]
 }

@@ -43,7 +43,7 @@ function saveProcessedUrl(url) {
     let processed = loadProcessedUrls();
     // We store the original URL but check against normalized versions
     const rawProcessed = fs.existsSync(PROCESSED_URLS_FILE) ? JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8')) : [];
-    
+
     if (!processed.includes(normalized)) {
         rawProcessed.push(url);
         fs.writeFileSync(PROCESSED_URLS_FILE, JSON.stringify(rawProcessed, null, 2));
@@ -91,6 +91,7 @@ async function run() {
         allApiData = [{
             url: dataRoot.url,
             type: dataRoot.type || dataRoot.widget_type,
+            unique_widget_id: dataRoot.unique_widget_id,
             configurations: dataRoot.configurations || dataRoot.configuration
         }];
     } else if (dataRoot.urls && dataRoot.urls.length > 0) {
@@ -132,6 +133,7 @@ async function run() {
         const entry = newUrls[i];
         const url = typeof entry === 'string' ? entry : (entry.customer_url || entry.url);
         const typeId = entry.widget_type || entry.type;
+        const widgetUUID = entry.unique_widget_id;
         const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
 
@@ -165,6 +167,7 @@ async function run() {
                 const record = {
                     url: url,
                     widgetType: typeName,
+                    widgetUUID: widgetUUID,
                     ...validationResult,
                     status: validationResult.aiAnalysis.overall_status || 'UNKNOWN',
                     timestamp: new Date().toISOString()

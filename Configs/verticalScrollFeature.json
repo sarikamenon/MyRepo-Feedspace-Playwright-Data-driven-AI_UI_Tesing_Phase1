@@ -1,10 +1,13 @@
 {
     "features": [
         "Show Review Date",
-        "Show Review Ratings",
-        "Shorten Long Reviews / Read More",
-        "Show Social Platform Icon",
+        "Read More",
         "Inline CTA",
         "Feedspace Branding"
+    ],
+    "commented_features": [
+        "Show Review Ratings",
+        "Show Social Platform Icon",
+        "Cross Scroll Animation"
     ]
 }

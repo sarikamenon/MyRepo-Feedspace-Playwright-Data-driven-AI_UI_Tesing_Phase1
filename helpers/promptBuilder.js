@@ -8,7 +8,7 @@ class PromptBuilder {
       "Slider Indicators": "is_show_indicators",
       "Show Review Date": "allow_to_display_feed_date",
       "Show Review Ratings": "is_show_ratings",
-      "Shorten Long Reviews / Read More": "show_full_review",
+      "Read More": "show_full_review",
       "Show Social Platform Icon": "show_platform_icon",
       "Inline CTA": "cta_enabled",
       "Feedspace Branding": "allow_to_remove_branding",
@@ -20,7 +20,7 @@ class PromptBuilder {
 
     // Features where "1" means HIDDEN and "0" means VISIBLE
     const invertedFeatures = {
-      "Shorten Long Reviews / Read More": true // show_full_review: 1 => HIDDEN, 0 => VISIBLE
+      "Read More": true // show_full_review: 1 => HIDDEN, 0 => VISIBLE
     };
 
     // Decide which features to test
@@ -71,7 +71,8 @@ SECTION 1: GLOBAL FEATURE DETECTION CONTRACT (NON-NEGOTIABLE)
 2. **GLOBAL AGGREGATION**: You are provided with ${isMultiImage ? 'multiple scans' : 'a scan'} of the widget. If a feature is visible in ANY image, its status is "Visible".
 3. **EAGLE-EYE SENSITIVITY**: These widgets often use tiny icons (~10px) as character suffixes. Scan the exact boundary of name strings and card corners.
 4. **TARGET SCOPE**: Focus EXCLUSIVELY on the **${widgetType}** widget. Ignore surrounding page elements.
-5. **VIDEO MEDIA EXCEPTION**: Video reviews (identified by a central Play Button) often do not contain Social Icons. If the widget is "Video-Only", report statuses realistically but explain the "Video Context" in the scenario.
+5. **REPORTING SCOPE**: Report EXCLUSIVELY on features explicitly listed in Section 5. If a feature is not in Section 5, DO NOT include it in the JSON output.
+6. **VIDEO MEDIA EXCEPTION**: Video reviews (identified by a central Play Button) often do not contain Social Icons. If the widget is "Video-Only", report statuses realistically but explain the "Video Context" in the scenario.
 
 ============================================================
 SECTION 2: WIDGET-SPECIFIC SCANNING RULES
@@ -79,10 +80,10 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 
 **AVATAR_GROUP**:
 - Analyze BOTH the avatar list AND the review popup that opens after clicking.
-- **Show Star Ratings** (AVATAR_GROUP exclusive): Look for a 5 aggregate stars placed to the RIGHT or BELOW the row of circular avatar photos
-- Show Review Ratings: Look for per-review stars INSIDE the review popup, below the reviewer's name.
+- **Show Star Ratings** (Aggregate Rating): Look for 1, 2, 3, 4, or 5 aggregate stars typically placed ABOVE, BELOW, or to the RIGHT of the row of circular avatar photos. This is the OVERALL rating for the group. It is OUTSIDE the popup.
+- **Show Review Ratings** (Individual Rating): Look for per-review star ratings INSIDE the review popup, usually below the reviewer's name.
 - Show Social Platform Icon: Any logo or icon in the TOP RIGHT corner inline with the reviewer name in the review popup = Visible.
-- Read More: Look for "Read More" link inside the popup text block. It can be at the end/bottom of the review text of the popup text block.
+- **Read More**: If config "show_full_review" is "0", you MUST find a "Read More" or "More" link inside the popup text block. If present, mark Visible. If "show_full_review" is "1", "Read More" should be Absent.
 - Review Date: Check BOTTOM LEFT of the review popup in formats like "Jan 25, 2025", "7 May 2025", or just the year (e.g., "2024"), and mark Visible if any date is seen.
 - Inline CTA: Look for a styled button or link with ("↗") at the bottom of the reviewtext in the popup area.
 -- Combine findings from ALL screenshots — if visible in any, mark Visible.
@@ -105,7 +106,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 - Review content (stars, date, social icon, text) appears ABOVE the avatar row.
 - Show Social Platform Icon: Any logo or icon in the RIGHT side of the reviewer's name = Visible.
 - Show Review Ratings: Per-review stars in the review content area above the avatars.
-- Read More: Look for "...", "Read More", or "...More" at the end of the review text.
+- Read More: Look for "Read More" at the end of the review text.
 - Combine findings from ALL screenshots — if visible in any, mark Visible.
 
 **FLOATING_TOAST**:
@@ -125,7 +126,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
   5. Also check the **TOP RIGHT CORNER** of any revealed large card/popup for a colored logo or icon (e.g., a teal chat bubble) → **Social Platform Icon: Visible**.
 - **Show Review Ratings (CARDS & POPUPS)**: Search for gold/yellow/green star icons inside EACH card in the scrolling strip (usually below the name) and inside any revealed popup. Refer to the red-underlined example in your training if available — stars often appear directly below the name string.
 - Show Review Date: Small gray text in footer corners.
-- Read More: "..." or "Read More" at the end of truncated text.
+- Read More: "Read More" at the end of truncated text.
 - **Inline CTA**: Look for a styled button (e.g. "Get Started") or link with a diagonal upward arrow icon (**↗**) at the bottom of the card or revealed popup area.
 - Combine findings from ALL screenshots — if visible in any (scrolling or popup), mark Visible.
 
@@ -135,7 +136,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 - Show Social Platform Icon: Any logo or icon (Google, LinkedIn/ln, Facebook, etc.) in the TOP RIGHT corner of each card = Visible.
 - Show Review Ratings: **CRITICAL**: Search EACH individual card for star icons (gold/yellow/green), typically located directly below the reviewer name.
 - Show Review Date: Any date text (even small/gray/faint) in any card = Visible.
-- Shorten Long Reviews / Read More: Any "...", "Read More", or "Show More" in any card = Visible.
+- Read More: Any "Read More" or "Show More" in any card = Visible.
 - Static UI elements only — horizontal movement is verified by a separate system.
 
 **MARQUEE — Vertical (Multi-Card, Up-Down Scroll)**:
@@ -144,7 +145,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 - Show Social Platform Icon: Any logo or icon (Google, LinkedIn/ln, Facebook, etc.) in the TOP RIGHT corner of each card = Visible.
 - Show Review Ratings: **CRITICAL**: Search EACH individual card for star icons (gold/yellow/green), typically located directly below the reviewer name.
 - Show Review Date: Any date text (even small/gray/faint) in any card = Visible.
-- Shorten Long Reviews / Read More: Any "...", "Read More", or "Show More" in any card = Visible.
+- Read More: Any "Read More" or "Show More" in any card = Visible.
 - Left & Right Buttons: Mark **Absent** — this widget type does not use left/right navigation arrows.
 - Static UI elements only — vertical movement is verified by a separate system.
 
@@ -154,17 +155,21 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 - Show Social Platform Icon: Any logo or icon in the TOP RIGHT corner of each card = Visible.
 - Show Review Ratings: Per-card star icons inside each card.
 - Show Review Date: Footer text (small/gray) in any card.
-- Read More: "..." or "Read More" at the end of truncated text.
+- Read More: "Read More" at the end of truncated text.
 - **Show Load More Button**: Look for a large, styled button at the absolute bottom center of the masonry grid.
 
 ============================================================
 SECTION 3: COMMON FAILURE MODES — AVOID THESE
 ============================================================
-- **Show Review Ratings**: Stars rendered in yellow/gold INSIDE cards or popups = **Visible**. Do NOT miss these!
-- **Shorten Long Reviews / Read More**: Any "Read More", "...more", or "..." link after truncated text = **Visible**. 
-- **Show Review Date**: Small text in footer corners like "January 16, 2025" or "May 27, 2025" = **Visible**.
-- **Show Social Platform Icon**: Any colored circular/square logo (G, Facebook, LinkedIn/ln, Trustpilot) near the name or in the top-right corner = **Visible**.
-- **CRITICAL**: If you can see it with human eyes, the status MUST be **Visible**. When in doubt, prefer **Visible** over **Absent**. False negatives are unacceptable.
+- **Show Star Ratings (AGGREGATE ONLY)**: These are the **OVERALL** ratings (e.g., "4.8/5" ,"5"or "Used by leading teams") appearing **OUTSIDE** the popup, near the avatar row or bottom of the Avatar Row.
+  - **EVIDENCE RULE**: If marked as Visible, you **MUST** specify where they are (e.g., "Top right of avatar row", "Center below avatars").
+- **Show Review Ratings (INDIVIDUAL ONLY)**: These are the ratings **INSIDE** the individual review cards/popups.
+- **MANDATORY DISTINCTION**: Do NOT mark stars inside a card as "Show Star Ratings". They are "Show Review Ratings". If Aggregate stars are not present outside the popup, mark "Show Star Ratings" as **Absent**.
+- **Read More**: **[HARD REQUIREMENT]** If you mark this as **Visible**, you **MUST** provide the exact 3 words preceding the link.
+  - **TRUNCATION VS LABEL**: If text is simply cut off at the bottom of a container without an explicit "Read More" button, "Show More" text, or "..." dots, the feature is **Absent**.
+  - **LEGIBILITY & CONTRAST**: If a link is present but so faint or low-contrast (e.g., light grey on white) that it's illegible, mark it as **Absent**.
+- **Show Review Date**: Check corners/footer of the review popup. Mark as Visible ONLY if a specific date is legible.
+- **CRITICAL ANTI-HALLUCINATION**: If a feature is not clearly legible or its specific location/text evidence cannot be provided, mark it as **Absent**. Hallucinating "Visible" for a feature that is not physically there is a MAJOR failure.
 
 ============================================================
 SECTION 4: TARGET FEATURE DETECTION MANUAL
@@ -180,11 +185,11 @@ For any feature marked as "Visible" in the Config Status, apply these precise de
    - Must be located INSIDE the specific review card, scrolling strip element, or modal.
 
 3. **Show Review Date**:
-   - Scan footer corners for text like "2 days ago", "Aug 2025", or a year.
-   - Even small/gray/faint text counts.
+   - Scan footer corners for text like "2 days ago", "Mar 11, 2026", "Aug 2025", or a year.
+   - Even small/gray/colored/faint text/number counts.
 
-4. **Shorten Long Reviews / Read More**:
-   - Look for "...more", "Read More", or "Show More" at the end of truncated text.
+4. **Read More**:
+   - Look for "Read More" or " More" at the end of truncated text.
 
 5. **Inline CTA Button**:
    - **CRITICAL**: Look for a styled button AND the exact diagonal upward arrow icon (**↗**).
@@ -199,6 +204,11 @@ For any feature marked as "Visible" in the Config Status, apply these precise de
 ============================================================
 SECTION 5: CONFIGURATION REQUIREMENTS
 ============================================================
+**IMPORTANT - VISUAL-FIRST ANALYSIS**: Determine the **UI Status** (Visible or Absent) based **EXTENSIVELY AND EXCLUSIVELY** on the provided screenshots **BEFORE** looking at the Config Status below. 
+- If you see a feature in the image, it is **Visible**, even if the Config Status says "Absent".
+- If you do NOT see a feature in the image, it is **Absent**, even if the Config Status says "Visible".
+- Mismatches between UI Status and Config Status MUST result in a **FAIL**.
+
 Validate the UI against these specific settings:
 
 ${instructions}
@@ -212,7 +222,11 @@ Before submission, perform this final pass:
 3. **Show star ratings**: Ensure per-review stars (individual ratings) are not confused with aggregate group stars.
 4. **Inline CTA**: Did I find the diagonal upward arrow (**↗**) for the CTA button?
 5. **Review Date**: Scan footer corners for text like "Jan 25, 2025" or the year.
-6. **Read More**: specifically check for "Read More" or "..." at the end of text blocks.
+6. **Read More**: specifically check for "Read More" at the end of text blocks.
+   - **STRICT VISUAL RULE**: ONLY mark as Visible if you can read the letters "Read More" or " More" . 
+   - **ANTI-HALLUCINATION**: Do NOT assume "Read More" exists just because the text looks long. If it's not explicitly labeled/visible in the screenshot, it is ABSENT.
+   - **LOGIC**: If "show_full_review" is "0" (False) in config, then reviews are truncated and "Read More" MUST be Visible.
+   - **LOGIC**: If "show_full_review" is "1" (True) in config, then reviews are full and "Read More" MUST be Absent.
 7. **VIDEO CONTEXT**: If features are absent, did I verify if it's because the widget is Video-Only?
 8. **LOAD MORE**: If "Show Load More Button" is Visible in config, did I scan the absolute bottom of the widget?
 
@@ -235,7 +249,7 @@ Return RAW JSON only. No markdown prose. No preamble.
       "feature": "[Feature Name]",
       "ui_status": "Visible/Absent",
       "config_status": "Visible/Absent/N/A",
-      "scenario": "[Brief explanation of matrix choice]",
+      "scenario": "[Brief explanation of evidence found]",
       "remarks": "[Diagnostic summary, e.g., 'UI visible, config absent, mismatches hence fail']",
       "status": "PASS/FAIL"
     }

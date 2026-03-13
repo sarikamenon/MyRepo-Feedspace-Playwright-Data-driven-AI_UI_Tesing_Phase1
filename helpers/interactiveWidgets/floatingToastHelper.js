@@ -67,13 +67,24 @@ class FloatingToastHelper {
             // 3️⃣ Click to expand
             console.log('[FloatingToastHelper] Clicking preview to expand...');
             await previewCard.hover({ force: true }).catch(() => { });
-            await previewCard.click({ force: true, timeout: 10000 }).catch(() => { });
-            await previewCard.dispatchEvent('click').catch(() => { });
+            await page.waitForTimeout(1000); // 🛡️ Delay after hover for stability
+
+            // Try multiple click methods
+            try {
+                await previewCard.click({ force: true, timeout: 5000 });
+            } catch (e) {
+                console.log('[FloatingToastHelper] Standard click failed, trying dispatchEvent...');
+                await previewCard.dispatchEvent('click').catch(() => { });
+            }
+            
+            // 4️⃣ Capture Full Page after click (to ensure we catch the expanded box)
+            console.log('[FloatingToastHelper] Capturing board-view screenshot after click...');
+            screenshotBuffers.push(await page.screenshot({ fullPage: true, animations: 'disabled' }));
 
             // Wait for expanded box
             console.log('[FloatingToastHelper] Waiting for expansion popup...');
             let expandedBox = page.locator(expandedSelectors.join(', ')).filter({ visible: true }).first();
-            await expandedBox.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
+            await expandedBox.waitFor({ state: 'visible', timeout: 8000 }).catch(() => { });
 
             await page.waitForTimeout(2000); // Allow settle
 

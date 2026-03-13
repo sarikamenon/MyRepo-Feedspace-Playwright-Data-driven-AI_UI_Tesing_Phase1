@@ -110,7 +110,7 @@ class AIEngine {
                 { feature: "Slider Indicators", ui_status: "Absent", config_status: "Visible", scenario: "UI hidden but config says visible", status: "FAIL" },
                 { feature: "Show Review Date", ui_status: "Visible", config_status: "Visible", scenario: "✅ Normal", status: "PASS" },
                 { feature: "Show Review Ratings", ui_status: "Visible", config_status: "Visible", scenario: "✅ Normal", status: "PASS" },
-                { feature: "Shorten Long Reviews / Read More", ui_status: "Visible", config_status: "Visible", scenario: "✅ Normal", status: "PASS" },
+                { feature: "Read More", ui_status: "Visible", config_status: "Visible", scenario: "✅ Normal", status: "PASS" },
                 { feature: "Show Social Platform Icon", ui_status: "Absent", config_status: "Visible", scenario: "UI hidden but config says visible", status: "FAIL" },
                 { feature: "Inline CTA", ui_status: "Visible", config_status: "Visible", scenario: "✅ Normal", status: "PASS" },
                 { feature: "Feedspace Branding", ui_status: "Absent", config_status: "Visible", scenario: "Branding hidden visually", status: "PASS" },
