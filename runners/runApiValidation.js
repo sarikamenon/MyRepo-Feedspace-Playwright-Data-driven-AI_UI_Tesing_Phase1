@@ -124,6 +124,7 @@ async function run() {
         const entry = dailyBatch[i];
         const url = entry.customer_url || entry.url;
         const typeId = entry.widget_type || entry.type;
+        const widgetUUID = entry.unique_widget_id;
         const typeName = WidgetDetector.identify({ type: typeId });
         const configuration = entry.configuration || entry.configurations;
 
@@ -156,6 +157,7 @@ async function run() {
 
                 const record = {
                     url: url,
+                    widgetId: widgetUUID,
                     widgetType: typeName,
                     ...validationResult,
                     status: validationResult.aiAnalysis.overall_status || 'UNKNOWN',

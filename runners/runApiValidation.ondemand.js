@@ -167,7 +167,7 @@ async function run() {
                 const record = {
                     url: url,
                     widgetType: typeName,
-                    widgetUUID: widgetUUID,
+                    widgetId: widgetUUID,
                     ...validationResult,
                     status: validationResult.aiAnalysis.overall_status || 'UNKNOWN',
                     timestamp: new Date().toISOString()
@@ -214,9 +214,7 @@ async function run() {
     const reportPath = await reportHelper.saveReport(finalReport);
     console.log(`\n[OnDemand] Validation Complete. Report: ${reportPath}`);
 
-    // Generate Visual HTML Dashboard
-    await reportHelper.generateHtmlReport(finalReport);
-    console.log(`[OnDemand] HTML Dashboard generated in reports folder.`);
+
 
     const basecampHelper = new BasecampHelper();
     await basecampHelper.sendReport(finalReport)
