@@ -3,6 +3,7 @@ node_modules/
 playwright-report/
 reports/
 test-results/
+screenshots/
 
 # Logs & debug files
 *.log
