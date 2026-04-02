@@ -11,7 +11,10 @@ const WidgetTypeConstants = {
     8: 'SINGLE_SLIDER',
     9: 'MARQUEE_UPDOWN',
     10: 'MARQUEE_LEFTRIGHT',
-    11: 'FLOATING_TOAST'
+    11: 'FLOATING_TOAST',
+    16: 'AVATAR_CAROUSEL',
+    17: 'CROSS_SLIDER',
+    18: 'COMPANY_LOGO_SLIDER'
 };
 
 const WidgetTypeNames = {
@@ -22,7 +25,10 @@ const WidgetTypeNames = {
     SINGLE_SLIDER: 8,
     MARQUEE_UPDOWN: 9,
     MARQUEE_LEFTRIGHT: 10,
-    FLOATING_TOAST: 11
+    FLOATING_TOAST: 11,
+    AVATAR_CAROUSEL: 16,
+    CROSS_SLIDER: 17,
+    COMPANY_LOGO_SLIDER: 18
 };
 
 // Frontend alias terms that map to backend constants
@@ -38,11 +44,17 @@ const WidgetAliases = {
     'floatingtoast': 'FLOATING_TOAST',
     'avatargroup': 'AVATAR_GROUP',
     'masonry': 'MASONRY',
-    'marqueestripe': 'MARQUEE_STRIPE'
+    'marqueestripe': 'MARQUEE_STRIPE',
+    'avatarcarousel': 'AVATAR_CAROUSEL',
+    'crossslider': 'CROSS_SLIDER',
+    'avatarslider': 'SINGLE_SLIDER',
+    'companylogoslider': 'COMPANY_LOGO_SLIDER'
 };
 
 // CSS class signatures mapped to widget types
 const CSS_SIGNATURES = [
+    { classes: ['feedspace-cross-slider', 'cross-slider', 'fe-cross-slider'], type: 'CROSS_SLIDER' },
+    { classes: ['feedspace-company-logo-slider', 'company-logo-slider', 'fe-company-logo-slider'], type: 'COMPANY_LOGO_SLIDER' },
     { classes: ['feedspace-vertical-scroll', 'feedspace-updown', 'vertical-marquee'], type: 'MARQUEE_UPDOWN' },
     { classes: ['fe-feedspace-avatar-group-widget-wrap', 'feedspace-avatar-group'], type: 'AVATAR_GROUP' },
     { classes: ['feedspace-carousel-widget', 'testimonial-slider', 'carousel_slider'], type: 'CAROUSEL_SLIDER' },
@@ -50,7 +62,8 @@ const CSS_SIGNATURES = [
     { classes: ['feedspace-floating-widget', 'fe-floating-toast', 'fe-toast-card', 'fe-chat-bubble'], type: 'FLOATING_TOAST' },
     { classes: ['feedspace-element-horizontal-scroll-widget', 'feedspace-left-right-shadow'], type: 'MARQUEE_LEFTRIGHT' },
     { classes: ['feedspace-single-review-widget', 'single-slider', 'feedspace-single-slider'], type: 'SINGLE_SLIDER' },
-    { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' }
+    { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' },
+    { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider', 'feedspace-embed'], type: 'AVATAR_CAROUSEL' }
 ];
 
 // ── VALID WIDGET TYPE IDs ────────────────────────────────────────────────────
@@ -59,12 +72,22 @@ const VALID_TYPE_IDS = new Set(Object.keys(WidgetTypeConstants).map(Number));
 class WidgetDetector {
 
     /**
-     * Identify widget type from a config object (API response or test config).
+     * Identify widget type from a raw string, numeric ID, or a full configuration object.
+     * @param {any} input - The raw type ID, name, or the full config object.
+     * @param {object} config - Optional fallback config for heuristics.
+     * @returns {string} The canonical widget type name (e.g., 'CAROUSEL_SLIDER') or 'Unknown'.
      */
-    static identify(config) {
-        if (!config) return 'Unknown';
+    static identify(input, config = {}) {
+        let raw = null;
+        let actualConfig = config;
 
-        const raw = config.widget_type_id ?? config.type;
+        if (input && typeof input === 'object') {
+            raw = input.widget_type_id ?? input.type;
+            actualConfig = input;
+        } else {
+            raw = input;
+        }
+
         if (raw === null || raw === undefined) return 'Unknown';
 
         const numericId = typeof raw === 'number' ? raw : parseInt(raw, 10);
@@ -75,8 +98,24 @@ class WidgetDetector {
         if (typeof raw === 'string') {
             const normalized = raw.toLowerCase().replace(/[_\- ]/g, '');
             if (WidgetAliases[normalized]) return WidgetAliases[normalized];
+            
+            // Fallback: If normalization didn't find it, try direct uppercase with underscores
             const upperRaw = raw.toUpperCase().replace(/[- ]/g, '_');
             if (WidgetTypeNames[upperRaw] !== undefined) return upperRaw;
+            
+            // Direct alias check for known common strings
+            if (normalized === 'companylogoslider') return 'COMPANY_LOGO_SLIDER';
+            if (normalized === 'crossslider') return 'CROSS_SLIDER';
+            if (normalized === 'avatarcarousel') return 'AVATAR_CAROUSEL';
+        }
+
+        // HINT — Unique Config Key Detection
+        if (config.show_crossbar === '1' || config.allow_cross_scrolling_animation === '1') {
+            return 'CROSS_SLIDER';
+        }
+        if (config.is_autoplay === '1' && config.marquee_speed) {
+            // Strong marquee hint
+            return 'MARQUEE_STRIPE';
         }
 
         return 'Unknown';
@@ -94,7 +133,7 @@ class WidgetDetector {
             if (!isNaN(numericId) && VALID_TYPE_IDS.has(numericId)) {
                 const typeName = WidgetTypeConstants[numericId];
                 const uid = json.unique_widget_id || json.unique_id || null;
-                return { typeName, typeId: numericId, uniqueWidgetId: uid };
+                return { typeName, typeId: numericId, uniqueWidgetId: uid, data: json };
             }
         }
 
@@ -104,14 +143,19 @@ class WidgetDetector {
             if (!isNaN(numericType) && VALID_TYPE_IDS.has(numericType)) {
                 const typeName = WidgetTypeConstants[numericType];
                 const uid = json.unique_widget_id || json.unique_id || null;
-                return { typeName, typeId: numericType, uniqueWidgetId: uid };
+                return { typeName, typeId: numericType, uniqueWidgetId: uid, data: json };
             }
 
             if (typeof rawType === 'string') {
                 const resolved = WidgetDetector.identify({ type: rawType });
                 if (resolved !== 'Unknown') {
                     const uid = json.unique_widget_id || json.unique_id || null;
-                    return { typeName: resolved, typeId: WidgetTypeNames[resolved] ?? null, uniqueWidgetId: uid };
+                    return { 
+                        typeName: resolved, 
+                        typeId: WidgetTypeNames[resolved] ?? null, 
+                        uniqueWidgetId: uid,
+                        data: json 
+                    };
                 }
             }
         }
@@ -213,31 +257,15 @@ class WidgetDetector {
                     if (el.shadowRoot) rawHtml += ' ' + el.shadowRoot.innerHTML;
                     const htmlSnippet = rawHtml.toLowerCase().substring(0, 2000);
 
-                    const collectClasses = (element, depth = 0) => {
-                        if (!element || depth > 3) return '';
-                        let cls = (element.className && typeof element.className === 'string') ? element.className : '';
-                        
-                        // Recurse into children
-                        for (const child of element.children) {
-                            cls += ' ' + collectClasses(child, depth + 1);
-                        }
-                        
-                        // Recurse into Shadow DOM
-                        if (element.shadowRoot) {
-                            cls += ' ' + collectClasses(element.shadowRoot, depth + 1);
-                        }
-                        
-                        return cls;
-                    };
-
-                    const ownClasses = collectClasses(el);
-                    const parentClasses = (el.parentElement || el.getRootNode()?.host) 
-                        ? (el.parentElement || el.getRootNode().host).className : '';
-                    const allClasses = `${parentClasses} ${ownClasses}`.toLowerCase().trim();
+                    const ownClasses = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+                    const parent = el.parentElement || el.getRootNode()?.host;
+                    const parentClasses = (parent && parent.className && typeof parent.className === 'string') ? parent.className.toLowerCase() : '';
+                    const allClasses = `${parentClasses} ${ownClasses}`.trim();
 
                     const isFeedspaceAnchor = !!(
                         allClasses.includes('feedspace-') ||
                         allClasses.includes('fe-') ||
+                        allClasses.includes('ccustom-code-') ||
                         el.hasAttribute('data-fs-processed') ||
                         htmlSnippet.includes('feedspace')
                     );
@@ -284,13 +312,16 @@ class WidgetDetector {
         // If attributes and CSS classes fail, check the raw HTML for keywords.
         const snippet = info.htmlSnippet;
         if (snippet.includes('masonry')) return 'MASONRY';
-        if (snippet.includes('carousel')) return 'CAROUSEL_SLIDER';
+        if (snippet.includes('cross-slider')) return 'CROSS_SLIDER';
+        if (snippet.includes('company-logo-slider')) return 'COMPANY_LOGO_SLIDER';
+        if (snippet.includes('avatar-carousel')) return 'AVATAR_CAROUSEL';
         if (snippet.includes('floating-toast') || snippet.includes('chat-bubble')) return 'FLOATING_TOAST';
         if (snippet.includes('avatar-group')) return 'AVATAR_GROUP';
         if (snippet.includes('strip-slider')) return 'MARQUEE_STRIPE';
         if (snippet.includes('single-slider')) return 'SINGLE_SLIDER';
         if (snippet.includes('marquee-updown')) return 'MARQUEE_UPDOWN';
         if (snippet.includes('marquee-leftright')) return 'MARQUEE_LEFTRIGHT';
+        if (snippet.includes('carousel')) return 'CAROUSEL_SLIDER';
 
         return 'Unknown';
     }

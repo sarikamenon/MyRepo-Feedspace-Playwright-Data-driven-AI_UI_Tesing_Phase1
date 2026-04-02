@@ -60,7 +60,10 @@ const WIDGET_CONFIG_MAP = {
     'SINGLE_SLIDER': 'avatarSliderFeature',
     'MARQUEE_UPDOWN': 'verticalScrollFeature',
     'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-    'FLOATING_TOAST': 'floatingCardsFeature'
+    'FLOATING_TOAST': 'floatingCardsFeature',
+    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
+    'CROSS_SLIDER': 'crossSliderFeature',
+    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature'
 };
 
 /**
@@ -104,6 +107,11 @@ async function run() {
     }
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
+    
+    // Dynamic Viewport Extraction (Default: 1920x700 as per runValidation.js)
+    const targetWidth = dataRoot.width ? parseInt(dataRoot.width) : 1920;
+    const targetHeight = dataRoot.height ? parseInt(dataRoot.height) : 700;
+    console.log(`[OnDemand] Target Viewport: ${targetWidth}x${targetHeight}`);
 
     const processedUrls = loadProcessedUrls();
     const newUrls = allApiData.filter(entry => {
@@ -121,7 +129,12 @@ async function run() {
 
     const browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+        ],
+        ignoreDefaultArgs: ['--enable-automation']
     });
 
     const reportHelper = new ReportHelper();
@@ -146,7 +159,13 @@ async function run() {
 
         while (attempt < maxAttempts && !success) {
             attempt++;
-            const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+            const context = await browser.newContext({ 
+                viewport: { width: targetWidth, height: targetHeight },
+                deviceScaleFactor: 1,
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                locale: 'en-US',
+                timezoneId: 'Asia/Dubai'
+            });
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
 

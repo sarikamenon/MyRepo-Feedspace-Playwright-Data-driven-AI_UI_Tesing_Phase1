@@ -42,11 +42,34 @@ class VerticalScrollHelper {
 
             if (columnCount === 0) {
                 console.log('[VerticalScrollHelper] Primary column selectors failed. Searching for containers with >3 children...');
-                const potentialCols = widgetLocator.locator('div, section, ul').filter({ has: context.locator('> *') });
-                const pcCount = await potentialCols.count();
+                // 🛡️ REWRITE: High-Speed Safe-Depth Search
+                // 1. Look for known high-confidence containers
+                // 2. Fallback to shallow children search (prevents infinite DOM-walking)
+                const containerSelectors = [
+                    '.feedspace-shadow-container',
+                    '.feedspace-embed-main',
+                    '.feedspace-elements-wrapper',
+                    '.feedspace-vertical-scroll-row',
+                    '> div',
+                    '> section',
+                    '> ul',
+                    '> * > div'
+                ];
+                
+                let potentialCols = widgetLocator.locator(containerSelectors.join(', ')).filter({ has: widgetLocator.locator('> *') });
+                let pcCount = await potentialCols.count();
+
+                // 🛡️ TIER 3 FALLBACK: Guarded Deep Scan (Infinite Loop Search)
+                // If Tier 1 & 2 fail, search deeper but limit to 100 candidates 
+                // to prevent 10-minute hangs on complex pages.
+                if (pcCount === 0) {
+                    console.log('[VerticalScrollHelper] Tier 1 & 2 failed. Triggering Guarded Deep Scan (Limit 100)...');
+                    potentialCols = widgetLocator.locator('div, section, ul').filter({ has: widgetLocator.locator('> *') });
+                    pcCount = Math.min(await potentialCols.count(), 100);
+                }
                 for (let i = 0; i < pcCount; i++) {
                     const childCount = await potentialCols.nth(i).locator('> *').count();
-                    if (childCount > 3) {
+                    if (childCount >= 1) {
                         columns = potentialCols.nth(i);
                         columnCount = 1;
                         console.log(`[VerticalScrollHelper] Fallback: Identified a column with ${childCount} items.`);

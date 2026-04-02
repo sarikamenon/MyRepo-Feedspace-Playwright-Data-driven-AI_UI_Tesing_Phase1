@@ -12,14 +12,20 @@ const ReportHelper = require('./reportHelper');
 const { WidgetDetector } = require('./widgetDetector');
 
 const AvatarGroupHelper = require('./interactiveWidgets/avatarGroupHelper');
+const AvatarCarouselHelper = require('./interactiveWidgets/avatarCarouselHelper');
 const FloatingToastHelper = require('./interactiveWidgets/floatingToastHelper');
+const CrossSliderHelper = require('./interactiveWidgets/crossSliderHelper');
+const CompanyLogoSliderHelper = require('./interactiveWidgets/companyLogoSliderHelper');
 const CarouselSliderHelper = require('./interactiveWidgets/carouselSliderHelper');
-const StripSliderHelper = require('./interactiveWidgets/stripSliderHelper');   // handles MARQUEE_STRIPE + SINGLE_SLIDER
+const StripSliderHelper = require('./interactiveWidgets/stripSliderHelper');   // handles MARQUEE_STRIPE
+const AvatarSliderHelper = require('./interactiveWidgets/avatarSliderHelper');  // handles SINGLE_SLIDER
 const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper');
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
 
 // All Feedspace widget selectors — ordered from most specific to least specific
 const FEEDSPACE_SELECTORS = [
+    '.feedspace-shadow-container',
+    '.feedspace-embed-main',
     '.feedspace-floating-card',
     '.feedspace-toast',
     '.feedspace-floating-widget',
@@ -31,8 +37,6 @@ const FEEDSPACE_SELECTORS = [
     '[class*="chat-box"]',
     '.fe-feedspace-avatar-group-widget-wrap',
     '.feedspace-carousel-widget',
-    '.testimonial-slider',
-    '.carousel_slider',
     '.feedspace-marque-main-wrap',
     '.feedspace-show-overlay',
     '[class*="feedspace-embed"]',
@@ -88,6 +92,7 @@ class PlaywrightHelper {
 
         this.aiResults = null;
         this.movementVerification = null;
+        this.geometricWarnings = []; // TRUTH DATA: Collected from mathematical probes to prevent AI hallucinations
         this.useFullPage = false;
     }
 
@@ -153,11 +158,25 @@ class PlaywrightHelper {
                     const json = JSON.parse(text);
 
                     // Use the new safe collector — skips cosmetic sub-objects,
-                    // only accepts type IDs in VALID_TYPE_IDS (4–11)
+                    // only accepts type IDs in VALID_TYPE_IDS.
                     const results = WidgetDetector.collectFromNestedPayload(json);
-                    for (const { typeName, uniqueWidgetId } of results) {
+
+                    for (const { typeName, uniqueWidgetId, data } of results) {
                         console.log(`[PlaywrightHelper] 📡 Network (JSON body): ${typeName}`);
                         this.detectedNetworkTypes.add(typeName);
+
+                        // TRUTH DATA: Save the live intercepted config so the AI can validate against it.
+                        // We prefer the 'data' sub-object if present (where most features live).
+                        
+                        // FIX: Autodiscovery for Unknown types (e.g. CLI runs without --type)
+                        if (this.expectedType === 'Unknown' || WidgetDetector.isSameType(typeName, this.expectedType)) {
+                            if (this.expectedType === 'Unknown') {
+                                console.log(`[PlaywrightHelper] 🕵️  Autodiscovered type: ${typeName}. Updating expectedType.`);
+                                this.expectedType = typeName;
+                            }
+                            this.config = data || json.data || json || this.config;
+                            console.log(`[PlaywrightHelper] 🛠️  Live config captured for ${typeName}.`);
+                        }
 
                         if (uniqueWidgetId) {
                             const uuidKey = String(uniqueWidgetId).trim().toLowerCase();
@@ -168,7 +187,7 @@ class PlaywrightHelper {
                 } catch (jsonErr) {
                     // ── Regex fallback on raw text ──
                     // FIX: Only match the unambiguous field names to avoid false positives
-                    const typeRegex = /"?(?:widget_type_id|widget_type)"?\s*[:=]\s*["']?(\d+)["']?/g;
+                    const typeRegex = /"?(?:widget_type_id|widget_type|type)"?\s*[:=]\s*["']?(\d+)["']?/g;
                     let match;
                     while ((match = typeRegex.exec(text)) !== null) {
                         const t = parseInt(match[1]);
@@ -182,7 +201,7 @@ class PlaywrightHelper {
             } catch (ignore) { /* Page navigated away — safe to ignore */ }
         });
 
-        // ── Navigation with retry ───────────────────────────────────────────
+
         let attempts = 0;
         const maxAttempts = 3;
 
@@ -295,6 +314,42 @@ class PlaywrightHelper {
      * Main validation method — discovers widget, captures screenshots, runs AI analysis.
      */
     async validateWithAI(staticFeatures) {
+        this.staticFeatures = staticFeatures;
+        
+        // --- UNIVERSAL ISOLATION LAYER ---
+        // Force-load widget-specific features if a type is identified.
+        // This ensures absolute feature isolation across all widget types.
+        try {
+            const WIDGET_CONFIG_MAP = {
+                'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
+                'CROSS_SLIDER': 'crossSliderFeature',
+                'AVATAR_CAROUSEL': 'avatarCarouselFeature',
+                'STRIP_SLIDER': 'stripSliderFeature',
+                'MARQUEE_STRIPE': 'stripSliderFeature',
+                'SINGLE_SLIDER': 'avatarSliderFeature',
+                'AVATAR_SLIDER': 'avatarSliderFeature',
+                'AVATAR_GROUP': 'avatarGroupFeature',
+                'CAROUSEL_SLIDER': 'carouselslider',
+                'MASONRY': 'masonryFeature',
+                'GRID': 'masonryFeature',
+                'MARQUEE_UPDOWN': 'verticalScrollFeature',
+                'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
+                'FLOATING_TOAST': 'floatingCardsFeature'
+            };
+            const lookupType = this.widgetType || this.expectedType;
+            if (lookupType && lookupType !== 'Unknown' && lookupType !== '--url') {
+                const configName = WIDGET_CONFIG_MAP[lookupType] || lookupType.toLowerCase();
+                const configPath = path.join(process.cwd(), 'Configs', `${configName}.json`);
+                if (fs.existsSync(configPath)) {
+                    const content = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                    this.staticFeatures = content.features;
+                    console.log(`[PlaywrightHelper] 🛡️  Universal Isolation Layer: Force-loaded ${this.staticFeatures.length} features for ${lookupType}`);
+                }
+            }
+        } catch (e) {
+            console.warn(`[PlaywrightHelper] Universal isolation failed: ${e.message}`);
+        }
+
         console.log(`[PlaywrightHelper] Starting widget discovery — expecting: ${this.expectedType}`);
 
         if (this.page.isClosed()) {
@@ -438,23 +493,41 @@ class PlaywrightHelper {
                 this.widgetType = this.expectedType;
             } else if (isDomMatched) {
                 this.widgetType = detectedType;
-            } else if (detectedType !== 'Unknown') {
-                this.widgetType = detectedType;
             } else {
-                this.widgetType = 'Unknown';
+                // HINT FALLBACK: Check if the captured config has unique keys for a specific type
+                const configHint = WidgetDetector.identify(this.config);
+                if (configHint !== 'Unknown') {
+                    console.log(`[PlaywrightHelper] 💡 Config Hint Detection: Using ${configHint} based on unique property keys.`);
+                    this.widgetType = configHint;
+                } else if (this.expectedType !== 'Unknown' && (detectedType === 'CAROUSEL_SLIDER' || detectedType === 'Unknown')) {
+                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, trust the config.
+                    console.log(`[PlaywrightHelper] 🛡️  Expected Override: Config explicitly requested ${this.expectedType}. Overriding detected ${detectedType}.`);
+                    this.widgetType = this.expectedType;
+                } else if (detectedType !== 'Unknown') {
+                    this.widgetType = detectedType;
+                } else {
+                    this.widgetType = 'Unknown';
+                }
             }
 
-            const isMatched = isNetworkMatched || isDomMatched;
+            // TRUTH OVERRIDE: Prevent common misidentifications (e.g. Cross Slider vs Carousel)
+            if (this.expectedType === 'CROSS_SLIDER' && this.widgetType === 'CAROUSEL_SLIDER') {
+                console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing CROSS_SLIDER identification over generic Carousel detection.`);
+                this.widgetType = 'CROSS_SLIDER';
+            }
+
+            const isMatched = isNetworkMatched || 
+                             (this.widgetType !== 'Unknown' && WidgetDetector.isSameType(this.widgetType, this.expectedType));
 
             this.typeMatchResult = {
                 expected: this.expectedType,
-                detected: detectedType,
+                detected: this.widgetType,
                 matched: isMatched,
                 reason: isNetworkMatched
                     ? `Widget type ${this.expectedType} confirmed via network interception`
-                    : isDomMatched
-                        ? `Widget type ${this.expectedType} confirmed via DOM analysis (Network intercept missing)`
-                        : `Config expects ${this.expectedType} but it was not found in any network response. Detected from DOM: ${detectedType}`
+                    : isMatched
+                        ? `Widget type ${this.expectedType} confirmed via config/DOM analysis (Network intercept missing)`
+                        : `Config expects ${this.expectedType} but it was not found in network. Detected: ${this.widgetType}`
             };
 
             console.log(`[PlaywrightHelper] Type match: ${this.typeMatchResult.matched ? '✅ PASS' : '❌ FAIL'} — ${this.typeMatchResult.reason}`);
@@ -527,7 +600,7 @@ class PlaywrightHelper {
 
             if (normalizedType === 'AVATAR_GROUP') {
                 const shots = await AvatarGroupHelper.interact(
-                    interactionContext, locator,
+                    interactionContext, locator, this.geometricWarnings,
                     async () => {
                         const popup = interactionContext
                             .locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"], .feedspace-avatar-tooltip, [class*="tooltip"], .fe-tooltip')
@@ -541,32 +614,47 @@ class PlaywrightHelper {
                 );
                 if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
 
+            } else if (normalizedType === 'AVATAR_CAROUSEL') {
+                const shots = await AvatarCarouselHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
+
+            } else if (normalizedType === 'CROSS_SLIDER') {
+                const shots = await CrossSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
+
+            } else if (normalizedType === 'COMPANY_LOGO_SLIDER') {
+                const shots = await CompanyLogoSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
+
             } else if (normalizedType === 'FLOATING_TOAST') {
-                const shots = await FloatingToastHelper.interact(interactionContext, locator);
+                const shots = await FloatingToastHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'CAROUSEL_SLIDER') {
-                const shots = await CarouselSliderHelper.interact(interactionContext, locator);
+                const shots = await CarouselSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (
                 normalizedType === 'MARQUEE_STRIPE' ||
-                normalizedType === 'STRIP_SLIDER' ||
-                normalizedType === 'SINGLE_SLIDER'
+                normalizedType === 'STRIP_SLIDER'
             ) {
-                const shots = await StripSliderHelper.interact(interactionContext, locator);
+                const shots = await StripSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+
+            } else if (normalizedType === 'SINGLE_SLIDER' || normalizedType === 'AVATAR_SLIDER') {
+                const shots = await AvatarSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'MARQUEE_UPDOWN') {
                 const { result, screenshots } = await VerticalScrollHelper.interact(
-                    interactionContext, locator, this.config
+                    interactionContext, locator, this.config, this.geometricWarnings
                 );
                 this.movementVerification = result;
                 if (screenshots?.length > 0) screenshotBuffers.push(...screenshots);
 
             } else if (normalizedType === 'MARQUEE_LEFTRIGHT') {
                 const { result, screenshots } = await HorizontalScrollHelper.interact(
-                    interactionContext, locator, this.config
+                    interactionContext, locator, this.config, this.geometricWarnings
                 );
                 this.movementVerification = result;
                 if (screenshots?.length > 0) screenshotBuffers.push(...screenshots);
@@ -582,11 +670,13 @@ class PlaywrightHelper {
                 }
             }
 
-            // ── STEP 8: Full-page context screenshot for AI ───────────────────
+            // ── STEP 8: Viewport-context screenshot for AI ───────────────────
+            // CRITICAL: We use fullPage: false so that the AI sees exactly what a human sees.
+            // If a popup is truncated at the bottom of the screen, it MUST be truncated in the image.
             if (!this.page.isClosed()) {
-                const fullPageScreenshot = await this.page.screenshot({ fullPage: true, animations: 'disabled' });
-                if (fullPageScreenshot) {
-                    screenshotBuffers.push(fullPageScreenshot);
+                const contextShot = await this.page.screenshot({ fullPage: false, animations: 'disabled' });
+                if (contextShot) {
+                    screenshotBuffers.push(contextShot);
                 }
             }
 
@@ -653,8 +743,19 @@ class PlaywrightHelper {
         const hasNoVisuals = screenshotBuffers.length === 0 || !screenshotBuffers.some(b => b && b.length > 0);
 
         if (isDetectionFailure && hasNoVisuals) {
-            console.error(`[PlaywrightHelper] 🛑 Aborting AI analysis: Widget not detected AND no visuals available.`);
-            return this._buildErrorResult('Automation could not locate the widget and no screenshots were captured.');
+            const reason = 'Automation could not locate the widget and no screenshots were captured.';
+            console.error(`[PlaywrightHelper] 🛑 Aborting AI analysis: ${reason}`);
+            return this._buildErrorResult(reason);
+        }
+
+        // --- STRICT VALIDATION: GHOST PASS PREVENTION ---
+        // If the widget type was CONFIRMED (matched) but ZERO focused screenshots were taken,
+        // it means the automation reached the element but failed to capture it.
+        // This MUST be a failure.
+        if (this.typeMatchResult?.matched && hasNoVisuals) {
+            const reason = `CRITICAL: Widget ${this.widgetType} confirmed via network, but visual capture failed. Check element visibility/dimensions.`;
+            console.error(`[PlaywrightHelper] 🛑 ${reason}`);
+            return this._buildErrorResult(reason);
         }
 
         const savedPaths = [];
@@ -673,8 +774,19 @@ class PlaywrightHelper {
             screenshotBuffers.filter(Boolean),
             this.config,
             this.widgetType,
-            staticFeatures
+            this.staticFeatures || staticFeatures,
+            this.geometricWarnings // Pass the hard facts to the AI
         );
+
+        // --- ENFORCE AESTHETIC-BASED FAILURE ---
+        // If any aesthetic category (A-G) has a FAIL status, the entire test must be marked as FAIL.
+        if (this.aiResults?.aesthetic_results) {
+            const hasAestheticFail = this.aiResults.aesthetic_results.some(res => res.status === 'FAIL');
+            if (hasAestheticFail) {
+                console.warn(`[PlaywrightHelper] Aesthetic failure detected in one or more categories. Marking overall status as FAIL.`);
+                this.aiResults.overall_status = 'FAIL';
+            }
+        }
 
         // Append movement verification
         if (this.movementVerification && this.aiResults?.feature_results) {
@@ -688,7 +800,7 @@ class PlaywrightHelper {
                     feature: featureName,
                     ui_status: status === 'PASS' ? 'Visible' : 'Absent',
                     config_status: 'Visible',
-                    scenario: this.movementVerification.message,
+                    issue: this.movementVerification.message,
                     status: (status === 'ERROR' || status === 'UNKNOWN') ? 'FAIL' : status
                 });
                 if (status === 'FAIL' || status === 'ERROR') {
@@ -703,7 +815,7 @@ class PlaywrightHelper {
                 feature: 'Widget Type Identification',
                 ui_status: this.typeMatchResult.detected,
                 config_status: this.typeMatchResult.expected,
-                scenario: this.typeMatchResult.reason,
+                issue: this.typeMatchResult.reason,
                 status: this.typeMatchResult.matched ? 'PASS' : 'FAIL'
             });
             if (!this.typeMatchResult.matched) {
@@ -741,7 +853,7 @@ class PlaywrightHelper {
                 feature_results: [{
                     feature: 'Automation Integrity',
                     status: 'FAIL',
-                    scenario: reason
+                    issue: reason
                 }]
             },
             screenshotPaths: []

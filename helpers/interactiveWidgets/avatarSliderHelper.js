@@ -1,132 +1,112 @@
 class AvatarSliderHelper {
     /**
-     * Interact with Avatar Slider widgets by clicking avatars.
-     * Capture **at least 3 popup screenshots** for reliable validation.
+     * Interact with Avatar Slider widgets (Single Slider) by clicking arrows or avatars.
+     * Captures high-res screenshots of the content area as it updates.
      *
-     * @param {import('playwright').Page} context - Playwright page or frame object
+     * @param {import('playwright').Page|import('playwright').Frame} context - Playwright context
+     * @param {import('playwright').Locator} widgetLocator - The parent widget container
+     * @param {string[]} geometricWarnings - Array to collect truth-data warnings
      * @returns {Promise<Buffer[]>} - Array of screenshot buffers
      */
-    static async interact(context) {
+    static async interact(context, widgetLocator, geometricWarnings = []) {
         console.log('[AvatarSliderHelper] Starting interactive avatar slider validation...');
         const screenshotBuffers = [];
 
-        // Determine the actual page object for full-page screenshots
+        // Determine the actual page object for screenshots if needed
         const page = context.page ? context.page() : context;
 
         try {
-            // 1️⃣ Locate all avatar buttons (resilient selector)
-            // Exclude 'read-more' buttons which are inside the review cards
-            let avatarControls = context.locator([
-                'div:has([data-index]) button:not(.feedspace-read-more-btn):not(.read-more)',
+            // 1️⃣ Determine the interaction targets (Arrows preferred, then Avatars)
+            const root = widgetLocator || context;
+
+            const arrowSelectors = [
+                '.feedspace-avatar-slider-next',
+                '.feedspace-items-slider-next',
+                '.next-btn',
+                '.swiper-button-next',
+                '.carousel-control-next',
+                'button:has-text(">")',
+                '[class*="next"]',
+                '[class*="right"]',
+                'svg[class*="next"]'
+            ];
+
+            const avatarSelectors = [
+                '.feedspace-avatar-dot',
                 '.feedspace-avatar-button',
                 '.slider-dot',
                 '.feedspace-avatar-item',
                 '.avatar-item',
                 '.avatar-wrapper',
                 'div[class*="avatar-item"]:not([class*="read-more"])',
-                '.swiper-slide',
-                '.owl-item'
-            ].join(', ')).filter({ visible: true });
+                '.swiper-slide'
+            ];
 
-            let totalControls = await avatarControls.count();
-            console.log(`[AvatarSliderHelper] Found ${totalControls} visible avatar/slide controls.`);
+            let nextArrow = root.locator(arrowSelectors.join(', ')).filter({ visible: true }).first();
+            let avatarControls = root.locator(avatarSelectors.join(', ')).filter({ visible: true });
 
-            // Fallback to arrows if no discrete avatar buttons found
-            let usingArrows = false;
-            if (totalControls === 0) {
-                console.log('[AvatarSliderHelper] No avatar buttons found. Attempting to find navigation arrows...');
-                avatarControls = context.locator([
-                    '.next-btn',
-                    '.swiper-button-next',
-                    '.carousel-control-next',
-                    'button:has-text(">")',
-                    'span:has-text(">")',
-                    '[class*="next"]',
-                    '[class*="right"]',
-                    'svg[class*="next"]',
-                    'svg[class*="right"]'
-                ].join(', ')).filter({ visible: true });
-                totalControls = await avatarControls.count();
-                if (totalControls > 0) {
-                    console.log(`[AvatarSliderHelper] Found ${totalControls} navigation arrows. Using arrows for interaction.`);
-                    usingArrows = true;
-                }
-            }
+            const hasArrows = await nextArrow.isVisible().catch(() => false);
+            const avatarCount = await avatarControls.count().catch(() => 0);
 
-            if (totalControls === 0) {
-                console.warn('[AvatarSliderHelper] No interactive controls found.');
-                return screenshotBuffers;
-            }
+            console.log(`[AvatarSliderHelper] Found: Arrows=${hasArrows}, Avatars=${avatarCount}`);
 
             // 2️⃣ Interaction Loop
-            const maxScreenshots = 3;
-            const maxAttempts = 10; // Try more avatars to find a long review with Read More
-            let hasCapturedReadMore = false;
+            const maxScreenshots = 4; // Capture initial + 3 interactions
+            const maxAttempts = 8;
+            
+            // Initial screenshot
+            const initialShot = await (widgetLocator || page).screenshot({ animations: 'disabled' }).catch(() => null);
+            if (initialShot) screenshotBuffers.push(initialShot);
 
-            for (let i = 0; i < totalControls && screenshotBuffers.length < maxScreenshots && i < maxAttempts; i++) {
-                const control = usingArrows ? avatarControls.first() : avatarControls.nth(i);
-
+            for (let i = 0; i < maxAttempts && screenshotBuffers.length < maxScreenshots; i++) {
                 try {
-                    // Click to reveal/scroll content
-                    await control.click({ force: true, timeout: 5000 });
-                    console.log(`[AvatarSliderHelper] Interaction #${i + 1} (${usingArrows ? 'Arrow' : 'Avatar'})`);
-
-                    // Wait for the UI to update and content to stabilize
-                    // CI/Headless might be slower, so we poll for text change
-
-                    // Locate the review content area
-                    const reviewBox = context.locator('.feedspace-single-review-widget, .feedspace-elements-wrapper').filter({ visible: true }).first();
-                    const reviewText = context.locator('.feedspace-element-review-contain-box, .feedspace-review-content').filter({ visible: true }).first();
-
-                    if (await reviewBox.isVisible()) {
-                        await reviewBox.scrollIntoViewIfNeeded();
+                    let target = null;
+                    if (hasArrows) {
+                        target = nextArrow;
+                        console.log(`[AvatarSliderHelper] Clicking Right Arrow (Interaction #${screenshotBuffers.length})`);
+                    } else if (avatarCount > 0) {
+                        target = avatarControls.nth(i % avatarCount);
+                        console.log(`[AvatarSliderHelper] Clicking Avatar #${i % avatarCount + 1} (Interaction #${screenshotBuffers.length})`);
                     }
 
-                    let text = '';
-                    const startTime = Date.now();
-                    while (Date.now() - startTime < 8000) {
-                        text = await reviewText.innerText().catch(() => '');
-                        if (text && text.trim().length >= 5) break;
-                        await context.waitForTimeout(500);
+                    if (!target) break;
+
+                    await target.scrollIntoViewIfNeeded().catch(() => { });
+                    await target.click({ force: true, timeout: 5000 }).catch(() => { });
+                    
+                    // Wait for content stabilization
+                    await context.waitForTimeout(2000);
+
+                    // Locate content area for high-res focus
+                    const contentArea = root.locator('.feedspace-items-slider, .feedspace-single-review-widget, .feedspace-elements-wrapper').filter({ visible: true }).first();
+                    
+                    if (await contentArea.isVisible()) {
+                        await contentArea.scrollIntoViewIfNeeded().catch(() => { });
                     }
 
-                    if (!text || text.trim().length < 5) {
-                        console.log(`[AvatarSliderHelper] Review content appears empty/loading after timeout. Skipping screenshot for index ${i}.`);
-                        continue;
-                    }
-
-                    // Check if 'Read More' is present
-                    const readMoreBtn = context.locator('.feedspace-read-more-btn, button:has-text("Read More"), .read-more').filter({ visible: true }).first();
-                    const isReadMoreVisible = await readMoreBtn.isVisible();
-
-                    if (isReadMoreVisible) {
-                        const box = await readMoreBtn.boundingBox();
-                        if (box && box.width > 0 && box.height > 0) {
-                            console.log(`[AvatarSliderHelper] Found physical Read More button: ${Math.round(box.width)}x${Math.round(box.height)}`);
-                            hasCapturedReadMore = true;
-                        }
-                    }
-
-                    // High-Resolution Focus: Capture the review box area specifically
-                    const buffer = await (await reviewBox.isVisible() ? reviewBox : page).screenshot({
+                    // Use the widgetLocator if available to capture the full context (arrows, avatars, text)
+                    const shotTarget = widgetLocator || (await contentArea.isVisible() ? contentArea : page);
+                    const buffer = await shotTarget.screenshot({
                         animations: 'disabled'
                     }).catch(() => null);
 
                     if (buffer) {
-                        screenshotBuffers.push(buffer);
-                        console.log(`[AvatarSliderHelper] Captured high-res state #${screenshotBuffers.length} ${isReadMoreVisible ? '(Confirmed Read More)' : '(Short Review)'}`);
+                        // Check for duplicate screenshots (if content didn't actually change)
+                        const lastBuffer = screenshotBuffers[screenshotBuffers.length - 1];
+                        if (lastBuffer && buffer.equals(lastBuffer)) {
+                            console.log('[AvatarSliderHelper] Content unchanged, skipping duplicate screenshot.');
+                        } else {
+                            screenshotBuffers.push(buffer);
+                        }
                     }
                 } catch (e) {
-                    console.warn(`[AvatarSliderHelper] Interaction failed: ${e.message}`);
+                    console.warn(`[AvatarSliderHelper] Interaction step failed: ${e.message}`);
                 }
-
-                // Finish if we have 3 shots and at least one has a Read More (if we've searched enough)
-                if (screenshotBuffers.length >= maxScreenshots && (hasCapturedReadMore || i >= maxAttempts - 1)) break;
             }
 
-            console.log(`[AvatarSliderHelper] Avatar slider interaction complete. Captured ${screenshotBuffers.length} total states.`);
+            console.log(`[AvatarSliderHelper] Interaction complete. Captured ${screenshotBuffers.length} states.`);
         } catch (error) {
-            console.warn(`[AvatarSliderHelper] Error during interaction: ${error.message}`);
+            console.warn(`[AvatarSliderHelper] Error: ${error.message}`);
         }
 
         return screenshotBuffers;
