@@ -14,7 +14,6 @@ class PromptBuilder {
       "Show Social Platform Icon": "show_platform_icon",
       "Inline CTA": "cta_enabled",
       "Feedspace Branding": "allow_to_remove_branding",
-      "Displays Gray mode": ["enable_grey_mode", "enable_gray_mode"],
       "Review Card Border & Shadow": ["is_show_border", "is_show_shadow"],
       "Show Star Ratings": "show_star_ratings",
       "Widget position": "widget_position",
@@ -36,10 +35,10 @@ class PromptBuilder {
 
         if (configKey) {
           const keys = Array.isArray(configKey) ? configKey : [configKey];
-          
+
           // NESTED LOOKUP: Features often live inside 'widget_customization' or 'data'
           const lookupContexts = [config, config.widget_customization, config.data].filter(Boolean);
-          
+
           const keyExists = keys.some(key => lookupContexts.some(ctx => key in ctx));
 
           if (keyExists) {
@@ -62,7 +61,12 @@ class PromptBuilder {
           expected = "N/A";
         }
 
-        return `- **${featureName}**: (Config Status: ${expected})`;
+        let statusSuffix = "";
+        if (featureName === "Read More" && expected === "Visible") {
+          statusSuffix = " << MANDATORY: IF INVISIBLE OR WHITE-ON-WHITE AFTER '...', MARK ABSENT & FAIL THEME >>";
+        }
+
+        return `- **${featureName}**: (Config Status: ${expected})${statusSuffix}`;
       })
       .join('\n');
 
@@ -78,21 +82,17 @@ Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULL
 
       MASONRY: `
 **MASONRY — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
-Q1. Are all cards across all columns fully visible, or are any cards clipped at the bottom/sides? → [FULLY VISIBLE / CLIPPED]
-Q2. Is the "Load More" button (if config expects it) fully visible or cut off? → [FULLY VISIBLE / CUT OFF / ABSENT]
-Q3. Do any cards in adjacent columns overlap each other? → [YES / NO]
-Q4. Are any cards in the outermost columns flush against the viewport edge with no padding? → [YES / NO]
 Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULLY VISIBLE / SOME PARTIALLY VISIBLE]
-RULE: If Q1 is CLIPPED, Q2 is CUT OFF, Q3 is YES, or Q5 is "SOME PARTIALLY VISIBLE" → status MUST be "FAIL", severity "CRITICAL".`,
+Q6. **INVISIBLE LINK CHECK (VERTICAL ANCHOR)**: Look at the ellipsis "...". Is there a legible "Read More" link next to it or on the LINE BELOW it? → [VISIBLE / INVISIBLE-SPACE]
+Q7. **GHOST CARD CHECK**: Does any card look empty or have invisible/white-on-white text where a review body should be? → [YES / NO]
+RULE: If Q1 is CLIPPED (and severe), Q2 is CUT OFF, Q3 is YES, Q5 is "SOME PARTIALLY VISIBLE", Q6 is INVISIBLE-SPACE, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       MARQUEE_STRIPE: `
 **MARQUEE STRIPE — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
-Q1. Are cards in the scrolling strip fully visible, or are any cards sliced at the top/bottom edges of the container? → [FULLY VISIBLE / SLICED]
-Q2. If a popup is open — is it fully contained within the viewport, or clipped at any edge? → [FULLY VISIBLE / CLIPPED / NO POPUP]
-Q3. Are any cards floating completely detached from the main strip? → [YES / NO]
-Q4. Does the strip container itself bleed outside the page boundary? → [YES / NO]
 Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULLY VISIBLE / SOME PARTIALLY VISIBLE]
-RULE: If Q1 is SLICED, Q2 is CLIPPED, Q3 is YES, Q4 is YES, or Q5 is "SOME PARTIALLY VISIBLE" → status MUST be "FAIL", severity "CRITICAL".`,
+Q6. **INVISIBLE LINK CHECK**: Does any card show an ellipsis "..." but NO legible "Read More" link? → [YES / NO]
+Q7. **GHOST CARD CHECK**: Does any card look empty or have invisible/white-on-white text where a review body should be? → [YES / NO]
+RULE: If Q1 is SLICED, Q2 is CLIPPED, Q3 is YES, Q4 is YES, Q5 is "SOME PARTIALLY VISIBLE", Q6 is YES, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       AVATAR_GROUP: `
 **AVATAR_GROUP — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
@@ -101,7 +101,9 @@ Q2. Does the widget's shadow or border overlap any unrelated page content below 
 Q3. CRITICAL: Examine the review popup bottom edge. Can you see a COMPLETE, rounded bottom border with padding below it? Or does the card hit a "flat wall" at the viewport bottom? → [ROUNDED BORDER VISIBLE / FLAT WALL TRUNCATION]
 Q4. Is any text or element inside the popup card cut off mid-line or vertically sliced? → [YES / NO]
 Q5. Are all elements (avatars, stars, text) fully contained within their respective containers? → [YES / NO]
-🚨 MANDATORY QA FAIL: If Q1 is CHOPPED, Q2 is YES, Q3 is FLAT WALL TRUNCATION, Q4 is YES, or Q5 is NO → status MUST be "FAIL", severity "CRITICAL".`,
+Q6. **INVISIBLE LINK CHECK (VERTICAL ANCHOR)**: Look at the ellipsis "...". Is there a legible, high-contrast "Read More" link directly next to it or on the LINE BELOW it? (Note: If that space is empty, it's NOT hidden in truncation; it's an invisible rendering failure). → [VISIBLE / INVISIBLE-SPACE]
+Q7. **GHOST CARD CHECK**: Does any review popup look empty or have invisible/white-on-white text where a review body should be? → [YES / NO]
+🚨 MANDATORY QA FAIL: If Q1 is CHOPPED, Q2 is YES, Q3 is FLAT WALL TRUNCATION, Q4 is YES, Q5 is NO, Q6 is INVISIBLE-SPACE, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       SINGLE_SLIDER: `
 **SINGLE SLIDER — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
@@ -109,26 +111,24 @@ Q1. Is the review content area (above the avatar row) fully visible, or sliced a
 Q2. Is the avatar row at the bottom fully visible, or are avatars cut off? → [FULLY VISIBLE / CUT OFF]
 Q3. Does the widget bleed outside the page viewport on any side? → [YES / NO]
 Q4. Is there any element floating outside the main widget boundary? → [YES / NO]
-Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULLY VISIBLE / SOME PARTIALLY VISIBLE]
-RULE: If Q1 is SLICED, Q2 is CUT OFF, Q3 is YES, Q4 is YES, or Q5 is "SOME PARTIALLY VISIBLE" → status MUST be "FAIL", severity "CRITICAL".`,
+Q5. Are all elements (avatars, stars, text) fully contained within their respective containers? → [YES / NO]
+Q6. **INVISIBLE LINK CHECK (VERTICAL ANCHOR)**: Look at the SPACE DIRECTLY BELOW the ellipsis "...". Is it empty/blank though config expects Read More? → [INVISIBLE-SPACE / VISIBLE]
+Q7. **GHOST CARD CHECK**: Does the review content look empty or have invisible/white-on-white text where the review body should be? → [YES / NO]
+RULE: If Q1 is SLICED, Q2 is CUT OFF, Q3 is YES, Q4 is YES, Q5 is NO, Q6 is INVISIBLE-SPACE, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       MARQUEE_UPDOWN: `
 **MARQUEE_UPDOWN — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
-Q1. Are vertically scrolling cards fully visible left-to-right, or clipped at the sides of the container? → [FULLY VISIBLE / CLIPPED]
-Q2. Are any cards sliced horizontally (partial card visible at top or bottom of the container)? → [YES / NO]
-Q3. Does the widget container itself bleed outside the page boundary? → [YES / NO]
-Q4. Are any cards overlapping each other vertically? → [YES / NO]
 Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULLY VISIBLE / SOME PARTIALLY VISIBLE]
-RULE: If Q1 is CLIPPED, Q2 is YES, Q3 is YES, Q4 is YES, or Q5 is "SOME PARTIALLY VISIBLE" → status MUST be "FAIL", severity "CRITICAL".`,
+Q6. **INVISIBLE LINK CHECK (VERTICAL ANCHOR)**: Look at the SPACE DIRECTLY BELOW the ellipsis "...". Is it empty/blank though config expects Read More? → [INVISIBLE-SPACE / VISIBLE]
+Q7. **GHOST CARD CHECK**: Does any card look empty or have invisible/white-on-white text where the review body should be? → [YES / NO]
+RULE: If Q1 is CLIPPED, Q2 is YES, Q3 is YES, Q4 is YES, Q5 is "SOME PARTIALLY VISIBLE", Q6 is INVISIBLE-SPACE, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       MARQUEE_LEFTRIGHT: `
 **MARQUEE_LEFTRIGHT — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
-Q1. Look at the edges of the row. Are any cards clipped at the container boundary? → [FULLY VISIBLE / CLIPPED]
-Q2. Are any individual cards within a row sliced vertically at the left/right edges? → [YES / NO]
-Q3. Do cards from different rows overlap each other? → [YES / NO]
-Q4. Does the widget container bleed outside the page boundary on any side? → [YES / NO]
 Q5. Are all review cards (square/rectangular boxes) fully visible? → [ALL FULLY VISIBLE / SOME PARTIALLY VISIBLE]
-RULE: If Q1 is CLIPPED, Q2 is YES, Q3 is YES, Q4 is YES, or Q5 is "SOME PARTIALLY VISIBLE" → status MUST be "FAIL", severity "CRITICAL".`,
+Q6. **INVISIBLE LINK CHECK (VERTICAL ANCHOR)**: Look at the SPACE DIRECTLY BELOW the ellipsis "...". Is it empty/blank though config expects Read More? → [INVISIBLE-SPACE / VISIBLE]
+Q7. **GHOST CARD CHECK**: Does any card look empty or have invisible/white-on-white text where the review body should be? → [YES / NO]
+RULE: If Q1 is CLIPPED, Q2 is YES, Q3 is YES, Q4 is YES, Q5 is "SOME PARTIALLY VISIBLE", Q6 is INVISIBLE-SPACE, or Q7 is YES → status MUST be "FAIL", severity "CRITICAL".`,
 
       AVATAR_CAROUSEL: `
 **AVATAR_CAROUSEL — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
@@ -154,9 +154,8 @@ RULE: If Q1 is CLIPPED, Q2 is "ONLY ONE BAR VISIBLE", Q3 is CLIPPED, or Q4 is "S
       COMPANY_LOGO_SLIDER: `
 **LOGO SLIDER — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
 Q1. Are the scrolling logos fully visible, or are they sliced at the top/bottom container edges? → [FULLY VISIBLE / SLICED]
-Q2. **GRAYSCALE CHECK**: Are the brand logos desaturated (Black and White / Grayscale) or colorful? → [GRAYSCALE / COLORFUL]
-Q3. **BROKEN TOKEN CHECK**: Can you see "(t)(t)(t)" or "(t)" tokens in the logo names or labels? → [YES - BROKEN TOKENS / NO - NORMAL TEXT]
-**MANDATORY FAIL RULE**: If Q1 is SLICED or Q3 is YES → status MUST be "FAIL", severity "CRITICAL". (Note: Q2 mismatch is handled in Section 7 feature results).
+Q2. **BROKEN TOKEN CHECK**: Can you see "(t)(t)(t)" or "(t)" tokens in the logo names or labels? → [YES - BROKEN TOKENS / NO - NORMAL TEXT]
+**MANDATORY FAIL RULE**: If Q1 is SLICED or Q2 is YES → status MUST be "FAIL", severity "CRITICAL".
 `,
 
       CAROUSEL_SLIDER: `
@@ -256,7 +255,8 @@ RULE: If Q1 is YES → FAIL, severity CRITICAL. If Q2 is MISMATCHED → FAIL, se
 
 🚨 **CRITICAL PRE-CHECK (ANSWER FIRST, BEFORE ANALYZING OTHER CATEGORIES):**
 
-STEP 1: Is there ANY popup, modal, or expanded review card visible in the screenshot?
+STEP 1: Is there ANY popup, modal, or expanded review card visible in the screenshot? 
+(Note: For Logo Sliders, a large white card appearing on top of the moving logo strip is a popup.)
 → [YES / NO]
 
 If NO: Mark this category as PASS (N/A) and skip to next category.
@@ -364,8 +364,9 @@ If ANY card is NOT fully visible:
 MANDATORY ISSUE FORMAT:
 "Review card is partially cut off at [top/bottom/left/right] causing incomplete visibility of content"
 
-⚠️ Even ONE half-cut card = FAIL
-⚠️ You are NOT allowed to mark PASS if ANY card is clipped
+⚠️ Even ONE half-cut card = FAIL (Aesthetic Category Only)
+⚠️ You are NOT allowed to mark PASS for the Layout category if ANY card is clipped.
+⚠️ **CRITICAL FEATURE ACCESS**: Even if a card is clipped at the screenshot boundary, you ARE MANDATED to search it for functional features like "Read More" and "Date". If those features are legible, report them as "Visible". Layout failures should NEVER cause feature extraction failures.
 
 ============================================================
 SECTION 2: WIDGET-SPECIFIC SCANNING RULES
@@ -412,7 +413,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 
 **SINGLE_SLIDER**:
 - Multiple screenshots show different reviews revealed by clicking an avatar.
-- Review content (stars, date, social icon, text) appears ABOVE the avatar row.
+- Review content (stars, social icon, text) appears ABOVE the avatar row.
 - Show Social Platform Icon: Any logo or icon in the RIGHT side of the reviewer's name = Visible.
 - Show Review Ratings: Per-review stars in the review content area above the avatars.
 - Read More: Look for "Read More" at the end of the review text.
@@ -435,7 +436,7 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 - **Show Review Ratings (CARDS & POPUPS)**: Search for gold/yellow/green star icons inside EACH card in the scrolling strip (usually below the name) and inside any revealed popup. Refer to the red-underlined example in your training if available — stars often appear directly below the name string.
 - Show Review Date: Small gray text in footer corners.
 - Read More: "Read More" at the end of truncated text.
-- **Inline CTA**: Look for a styled button (e.g. "Get Started") or link with a diagonal upward arrow icon (**↗**) at the bottom of the card or revealed popup area.
+- **Inline CTA (CRITICAL)**: Look for a large, styled button at the absolute bottom of the revealed popup. It often has a distinct color (e.g., lavender/pink/blue/white/black/gray) and **MANDATORILY** contains a diagonal upward arrow icon (**↗**). Even if the label is "Get Started?" or another phrase, report as **Visible** if the icon and button style are present.
 - Combine findings from ALL screenshots — if visible in any (scrolling or popup), mark Visible.
 
 **CROSS_SLIDER**:
@@ -449,11 +450,11 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 
 
 **COMPANY_LOGO_SLIDER**:
-- **Grayscale Mode (Gray Mode)**: **[CRITICAL TIP]** Look exclusively at the **brand logos** in the slider. If the logos are desaturated (Black and White / Grayscale) -> "**Visible**". If the logos have their original colors (e.g., a green logo is green, a red one is red) -> "**Absent**".
 - **🚨 BROKEN TOKEN CHECK (CRITICAL)**: Scan all text labels. If you see "(t)(t)(t)" tokens, FAIL "C. CONTENT & TEXT RENDERING".
-- **Show Review Date**: Look ONLY inside the opened review.
-- **Inline CTA**: Look ONLY inside the opened review.
-- **IMPORTANT**: Combine findings. If any logo is colorful, the mode is Absent. If all logos are gray, the mode is Visible.
+- **ANCHOR-BASED POPUP SCAN**: A white card appearing over the logo strip (usually Center or Bottom-Center quadrant) IS a popup. When visible, ignore any "(t)" tokens and scan DOWNWARDS from the top of the card:
+  1. Skip the media/image area.
+  2. Find the **Review Date**: Look for small gray text (strictly format 'Month DD, YYYY') immediately below the media but above the CTA. YOU MUST explicitly quote the date string in your remarks.
+  3. Find the **Inline CTA**: Look for a styled button characterized by a diagonal arrow (↗) at the absolute bottom. The label text can vary (e.g., 'Get Started'). YOUR REMARKS MUST explicitly specify the label.
 
 
 **MARQUEE — Horizontal (Multi-Card, Left-Right Scroll)**:
@@ -477,11 +478,12 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 
 
 **MASONRY**:
-- Multi-column brick-style layout. Scan every card across all visible columns.
+- Multi-column brick-style layout. Scan every card across all columns in all screenshots.
+- **Read More (CRITICAL DETECTION)**: Look for the blue,black or colored text "Read More" positioned **immediately after the review text** and **BEFORE the date**. It frequently acts as a bridge between the review and the meta-data.
+- **EAGLE EYE RULE**: If you see "..." at the end of a long review, almost certainly there is a "Read More" link nearby. Zoom in on the pixels between the text end and the date. If seen on any visible card (even a clipped one), mark as **Visible**.
 - Show Social Platform Icon: Any logo or icon in the TOP RIGHT corner of each card = Visible.
 - Show Review Ratings: Per-card star icons inside each card.
 - Show Review Date: Footer text (small/gray) in any card.
-- Read More: "Read More" at the end of truncated text.
 - **Show Load More Button**: Look for a large, styled button at the absolute bottom center of the masonry grid.
 
 
@@ -493,8 +495,9 @@ SECTION 3: COMMON FAILURE MODES — AVOID THESE
 - **Show Review Ratings (INDIVIDUAL ONLY)**: These are the ratings **INSIDE** the individual review cards/popups.
 - **MANDATORY DISTINCTION**: Do NOT mark stars inside a card as "Show Star Ratings". They are "Show Review Ratings". If Aggregate stars are not present outside the popup, mark "Show Star Ratings" as **Absent**.
 - **Read More**: **[HARD REQUIREMENT]** If you mark this as **Visible**, you **MUST** provide the exact 3 words preceding the link.
-  - **TRUNCATION VS LABEL**: If text is simply cut off at the bottom of a container without an explicit "Read More" button, "Show More" text, or "..." dots, the feature is **Absent**.
-  - **LEGIBILITY & CONTRAST**: If a link is present but so faint or low-contrast (e.g., light grey on white) that it's illegible, mark it as **Absent**.
+  - **THE ELLIPSIS RULE**: The presence of an ellipsis ("...") or "..." dots is **NOT** evidence that "Read More" is Visible. It only confirms the text is truncated. 
+  - **LITERAL VISION ONLY**: You must ONLY mark "Read More" as Visible if you can physically see the distinct words "Read More", "Show More", or a styled, high-contrast button.
+  - **LEGIBILITY & CONTRAST (CRITICAL)**: If you see "..." but the following link area is blank, white-on-white, or illegible, you **MUST** mark it as **Absent** AND YOU MUST FAIL "F. THEME & COLOR VISIBILITY".
 - **Show Review Date**: Check corners/footer of the review popup. Mark as Visible ONLY if a specific date is legible.
 - **CRITICAL ANTI-HALLUCINATION**: If a feature is not clearly legible or its specific location/text evidence cannot be provided, mark it as **Absent**.
 
@@ -536,7 +539,8 @@ B. ELEMENT CONTAINMENT
 - Very long words or unbroken text do not break layout
 
 C. CONTENT & TEXT RENDERING
-- **BROKEN TOKENS / RAW CODE**: Look closely at the text payload. If you see raw placeholder tokens, unrendered code, or weird repeating structural characters like "(t) (t) (t)" instead of actual content, YOU MUST FAIL THIS CATEGORY. This implies the widget failed to parse its data.
+- **CONTENT COMPLETENESS (CRITICAL)**: Content must be FULLY rendered. If text is cut-off at the bottom edge (truncation) without an aesthetic ellipsis, YOU MUST FAIL THIS CATEGORY. Incomplete text = Broken Rendering.
+- **GHOST CARDS (CRITICAL / PRIORITY #1)**: If you see a card box (container) but its interior appears empty or text is invisible (white-on-white), YOU MUST FAIL THIS CATEGORY IMMEDIATELY. This is the most severe rendering error possible.
 - Long text truncated properly with ellipsis (no text cut abruptly midway vertically without visual fade)
 - Emojis/special characters do not overflow
 - Review text clamped at configured lines with ellipsis
@@ -556,13 +560,16 @@ E. MEDIA & IMAGES
 - Media fully visible or scrollable
 
 F. THEME & COLOR VISIBILITY
-- **FATAL ILLEGIBILITY**: All text MUST have high contrast against its background. If you see dark text on a dark background (e.g., dark grey text on a black card) or light text on a light background, making it hard to read, YOU MUST FAIL THIS CATEGORY.
-- **THEME INCONSISTENCY**: Widget components must share the same theme. If a floating/preview card is Dark Theme but its expanded popup is Light Theme (or vice versa), this is a broken user experience. FAIL the category for "Theme Mismatch".
+- **FATAL ILLEGIBILITY**: All text and clickable links MUST have high contrast against their background. 
+- **INVISIBLE LINKS (CRITICAL)**: Look for "Read More" or buttons near "..." ellipses. If the text or button is present but invisible due to color matching (e.g., White text on White background), YOU MUST FAIL THIS CATEGORY. This is a severe rendering defect.
+- **BAD CONTRAST**: If you see dark text on a dark background or light text on a light background, making it hard to read, YOU MUST FAIL THIS CATEGORY.
+- **THEME INCONSISTENCY**: Widget components must share the same theme. If a floating/preview card is Dark Theme but its expanded popup is Light Theme (or vice versa), FAIL the category for "Theme Mismatch".
 
 G. POPUPS & MODALS
 - First determine: Is any popup/modal visible in the screenshot?
 - IF YES:
-  - **FATAL POPUP CLIPPING**: The entire popup card MUST be 100% visible. If the bottom, top, left, or right edges of the popup are sliced off (e.g., the bottom review text is chopped in half horizontally as if hitting an invisible wall), YOU MUST FAIL this category immediately.
+  - **FATAL POPUP CLIPPING**: The entire popup card MUST be 100% visible. If any edge of the popup is sliced off, YOU MUST FAIL this category immediately. 
+  - **LOCATION REQUIREMENT**: If you fail for clipping, you **MUST** specify which edge is truncated (**Top, Bottom, Left, or Right**) and describe the visual evidence (e.g., "Review text cut off midway at the bottom edge").
   - **MODAL PLACEMENT**: The popup should be logically centered or positioned cleanly relative to its trigger. If the popup is severely misaligned (e.g., shoved into the absolute bottom left corner, overlapping things disjointedly), FAIL this category.
   - Popup content is fully readable (no half-cut text lines).
   - Proper padding inside popup (text does not touch edges).
@@ -631,9 +638,8 @@ FINAL CHECKPOINT — POPUP TRUNCATION:
 □ No text is cut off mid-line at the bottom edge
 □ The card does not hit a "flat wall" at the viewport boundary
 
-🚨 **ZERO TOLERANCE**: If the card background hits the bottom of the screenshot with a flat line, it is a FAIL.
-
-If you CANNOT check ALL boxes above → You MUST mark "G. POPUPS & MODALS" as FAIL (CRITICAL)
+🚨 **ZERO TOLERANCE**: If the card background hits the bottom of the screenshot with a flat line, it is a FAIL in Category G.
+🚨 **THE VERTICAL-PROXIMITY ANCHOR (READ MORE)**: The "Read More" link lives either on the same line as the ellipsis "..." or **directly on the line below it**. If that specific space is empty but the config expects visibility, YOU MUST NOT assume it is "hidden in truncation." It is a RENDERING FAILURE. You MUST FAIL Categories C and F.
 
 Evidence Required: Describe what you see at the bottom of the popup:
 Example: "Clean rounded bottom border with 16px padding below 'Get Started' button"
@@ -667,9 +673,10 @@ Use the following logic to determine the "Status" for features in Section 5:
     - If NO issues:
       → "No visual defects detected"
 
-    - "severity": "CRITICAL, HIGH, MEDIUM, LOW, or N/A"
-    - "status": "FAIL" (if issue detected) or "PASS" (if no issues)
-    - **ZERO TOLERANCE**: If any layout pre-analysis question (Q1-Q5) triggered a FAIL/SLICED/CHOPPED/FLAT WALL result, you are FORBIDDEN from marking the category as PASS.
+    - **ZERO TOLERANCE (RENDERING)**: If any "GHOST CARD CHECK" (Q7) or "INVISIBLE LINK CHECK" (Q6) triggered a YES result, you are FORBIDDEN from marking "C. CONTENT & TEXT RENDERING" or "F. THEME & COLOR VISIBILITY" as PASS. You must report: "Card body or functional text is invisible causing fatal rendering failure".
+    - **COUPLED-FAULT RULE (MANDATORY)**: If you fail Category A or G for clipping/truncation, you MUST also fail Category C and Category F. Truncation = Incomplete Content = Lack of Visibility. You are FORBIDDEN from reporting "No visual defects detected" for Content or Theme if the card is physically cut off.
+    - **MULTI-FAULT REPORTING (MANDATORY)**: Do NOT let a layout failure (clipping) mask a rendering failure (invisible text). If both exist, you MUST fail BOTH categories. "No visual defects detected" is FORBIDDEN if ANY defect in that category is observed in the visible pixels.
+    - **ZERO TOLERANCE (LAYOUT)**: If any layout pre-analysis question (Q1-Q5) triggered a FAIL/SLICED/CHOPPED/FLAT WALL result, you are FORBIDDEN from marking the category as PASS.
 
 **OUTPUT FORMAT**:
 Return RAW JSON only. No markdown prose. No preamble.

@@ -10,14 +10,10 @@ class StripSliderHelper {
         try {
             // Locate all clickable review cards or their sub-elements that trigger popups
             const cardSelectors = [
-                // User provided specific paths (most accurate right now)
                 '.feedspace-marquee-box',
                 '.feedspace-element-feed-box',
                 'div[data-feed-id]',
                 'div[data-review-id]',
-                '.feedspace-marquee-box-inner',
-                '.feedspace-review-bio-img',
-                '.feedspace-marquee-left',
                 '[data-testid="review-card"]'
             ];
 
@@ -39,105 +35,98 @@ class StripSliderHelper {
 
             let targetsToClick = [];
             const seenIds = new Set();
+            const MAX_CAPTURES = 6; 
+            const TARGET_POOL_SIZE = 12; // Over-index to ensure we get 6 successful captures
 
             for (const card of allCards) {
-                if (targetsToClick.length >= 3) break;
+                if (targetsToClick.length >= TARGET_POOL_SIZE) break;
 
-                // Try to get a unique identifier to avoid clones/duplicates
                 const feedId = await card.getAttribute('data-feed-id').catch(() => null);
                 const reviewId = await card.getAttribute('data-review-id').catch(() => null);
-                const uniqueId = feedId || reviewId;
+                const interactionId = await card.getAttribute('data-fs-interaction-id').catch(() => null);
+                const uniqueId = feedId || reviewId || interactionId;
 
                 if (uniqueId) {
                     if (!seenIds.has(uniqueId)) {
                         seenIds.add(uniqueId);
                         targetsToClick.push(card);
                     }
-                } else {
-                    // Fallback: if no ID, just pick it if we have space, but prefer those with IDs first
-                    // We'll do a second pass if we don't find 3 with IDs
                 }
             }
 
-            // Fallback: If we didn't find 3 unique IDs, just pick distinct indices with spacing
-            if (targetsToClick.length < 3 && allCards.length > targetsToClick.length) {
-                for (let i = 0; i < allCards.length; i += Math.max(1, Math.floor(allCards.length / 4))) {
-                    if (targetsToClick.length >= 3) break;
+            // Fallback: If pool is still small
+            if (targetsToClick.length < TARGET_POOL_SIZE && allCards.length > 0) {
+                for (let i = 0; i < allCards.length; i++) {
+                    if (targetsToClick.length >= TARGET_POOL_SIZE) break;
                     if (!targetsToClick.includes(allCards[i])) {
                         targetsToClick.push(allCards[i]);
                     }
                 }
             }
 
-            console.log(`[StripSliderHelper] Selected ${targetsToClick.length} distinct cards for interaction.`);
+            console.log(`[StripSliderHelper] Target pool created with ${targetsToClick.length} candidates. Aiming for 6 successful captures.`);
+
+            let successfulCaptures = 0;
 
             for (const target of targetsToClick) {
+                if (successfulCaptures >= MAX_CAPTURES) break;
+                if (page.isClosed()) {
+                    console.log('[StripSliderHelper] Page closed. Terminating interaction loop.');
+                    break;
+                }
+
                 try {
-                    console.log(`[StripSliderHelper] Attempting aggressive interaction...`);
+                    console.log(`[StripSliderHelper] Attempting interaction with candidate ${successfulCaptures + 1}...`);
 
-                    // Hover first to stabilize (stop marquee)
+                    // Ensure target is somewhat in view and stabilized
+                    await target.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+                    if (page.isClosed()) break;
                     await target.hover({ force: true }).catch(() => { });
-                    await context.waitForTimeout(1000); // 1s pause
+                    await context.waitForTimeout(1000).catch(() => {}); 
 
-                    // Click with force AND dispatchEvent
-                    console.log(`[StripSliderHelper] Clicking card ${target}...`);
+                    // Duo-Trigger Click
+                    if (page.isClosed()) break;
                     await target.click({ force: true, timeout: 5000 }).catch(() => { });
                     await target.dispatchEvent('click').catch(() => { });
 
-                    // WAIT 2 SECONDS as per user request
-                    console.log('[StripSliderHelper] Waiting 2s for popup to stabilize...');
-                    await context.waitForTimeout(2000);
+                    if (page.isClosed()) break;
+                    await context.waitForTimeout(1000).catch(() => {});
 
                     // Detect popup
-                    const popupSelectors = [
-                        '.fe-review-box', 
-                        '.fe-review-box-inner', 
-                        '.feedspace-review-box-main', // GuruMuscle specific/Standard
-                        '[class*="review-box"]', 
-                        '[class*="popup"]'
-                    ];
+                    const popupSelectors = ['.fe-review-box', '.fe-review-box-inner', '.feedspace-review-box-main', '[class*="review-box"]', '[class*="popup"]'];
                     let popup = context.locator(popupSelectors.join(', ')).filter({ visible: true }).first();
 
-                    if (!(await popup.isVisible())) {
-                        const page = context.page ? context.page() : context;
+                    if (!(await popup.isVisible().catch(() => false))) {
                         popup = page.locator(popupSelectors.join(', ')).filter({ visible: true }).first();
                     }
 
-                    // Strict Visibility Check: Ensure it has dimensions to avoid false positives
-                    const popupBox = await popup.boundingBox().catch(() => null);
-                    if (await popup.isVisible() && popupBox && popupBox.width > 50 && popupBox.height > 50) {
-                        console.log('[StripSliderHelper] Popup visible. Capturing viewport screenshot...');
-                        // Use the page-level screenshot to capture the popup in its full context/viewport
-                        const page = context.page ? context.page() : context;
-                        const buf = await page.screenshot({ animations: 'disabled' }).catch(() => null);
-                        if (buf) screenshots.push(buf);
+                    const isVisible = await popup.isVisible().catch(() => false);
+                    const popupBox = isVisible ? await popup.boundingBox().catch(() => null) : null;
 
-                        // CLOSE the popup explicitly
-                        console.log('[StripSliderHelper] Closing popup...');
+                    if (isVisible && popupBox && popupBox.width > 50) {
+                        console.log(`[StripSliderHelper] Capture ${successfulCaptures + 1} SUCCESS. Saving screenshot...`);
+                        const buf = await page.screenshot({ animations: 'disabled' }).catch(() => null);
+                        if (buf) {
+                            screenshots.push(buf);
+                            successfulCaptures++;
+                        }
+
+                        // Reset: Close popup
+                        if (page.isClosed()) break;
+                        console.log('[StripSliderHelper] Closing popup for next interaction...');
                         const closeBtnSelectors = '.fe-review-box-close-icon, .feedspace-review-box-close-icon, [class*="close-icon"], [class*="close-btn"], button:has-text("X")';
                         let closeBtn = context.locator(closeBtnSelectors).filter({ visible: true }).first();
-
-                        if (!(await closeBtn.isVisible())) {
-                            const page = context.page ? context.page() : context;
-                            closeBtn = page.locator(closeBtnSelectors).filter({ visible: true }).first();
-                        }
-
-                        if (await closeBtn.isVisible()) {
-                            await closeBtn.click();
+                        if (await closeBtn.isVisible().catch(() => false)) {
+                            await closeBtn.click().catch(() => {});
                         } else {
-                            // Click outside (top-left of page)
-                            const page = context.page ? context.page() : context;
-                            await page.mouse.click(10, 10);
+                            await page.mouse.click(10, 10).catch(() => {});
                         }
-
-                        // WAIT 1 SECOND before next interaction
-                        console.log('[StripSliderHelper] Waiting 1s before next review...');
-                        await context.waitForTimeout(1000);
+                        await context.waitForTimeout(500).catch(() => {});
                     } else {
-                        console.log('[StripSliderHelper] No popup appeared for this card.');
+                        console.log('[StripSliderHelper] Candidate did not produce a valid popup.');
                     }
                 } catch (err) {
-                    console.warn(`[StripSliderHelper] Failed to interact with a card: ${err.message}`);
+                    console.warn(`[StripSliderHelper] Candidate interaction failed: ${err.message}`);
                 }
             }
 
