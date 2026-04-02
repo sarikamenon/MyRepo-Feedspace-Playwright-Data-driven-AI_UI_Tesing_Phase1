@@ -76,7 +76,10 @@ const WIDGET_CONFIG_MAP = {
     'SINGLE_SLIDER': 'avatarSliderFeature',
     'MARQUEE_UPDOWN': 'verticalScrollFeature',
     'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-    'FLOATING_TOAST': 'floatingCardsFeature'
+    'FLOATING_TOAST': 'floatingCardsFeature',
+    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
+    'CROSS_SLIDER': 'crossSliderFeature',
+    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature'
 };
 
 /**

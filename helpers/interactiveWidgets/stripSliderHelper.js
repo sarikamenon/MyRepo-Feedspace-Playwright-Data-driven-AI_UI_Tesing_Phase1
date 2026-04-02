@@ -27,6 +27,11 @@ class StripSliderHelper {
             const initialFullPageBuffer = await page.screenshot({ fullPage: true }).catch(() => null);
             if (initialFullPageBuffer) screenshots.push(initialFullPageBuffer);
 
+            // 0.1 Focused screenshot of the widget itself (highly recommended for visual validation)
+            console.log('[StripSliderHelper] Capturing focused widget screenshot...');
+            const widgetShot = await (widgetLocator || page).screenshot({ animations: 'disabled' }).catch(() => null);
+            if (widgetShot) screenshots.push(widgetShot);
+
             // 1. Detect Unique Cards
             const cardLocator = context.locator(cardSelectors.join(', ')).filter({ visible: true });
             const allCards = await cardLocator.all();
@@ -84,7 +89,13 @@ class StripSliderHelper {
                     await context.waitForTimeout(2000);
 
                     // Detect popup
-                    const popupSelectors = ['.fe-review-box', '.fe-review-box-inner', '[class*="review-box"]', '[class*="popup"]'];
+                    const popupSelectors = [
+                        '.fe-review-box', 
+                        '.fe-review-box-inner', 
+                        '.feedspace-review-box-main', // GuruMuscle specific/Standard
+                        '[class*="review-box"]', 
+                        '[class*="popup"]'
+                    ];
                     let popup = context.locator(popupSelectors.join(', ')).filter({ visible: true }).first();
 
                     if (!(await popup.isVisible())) {
@@ -92,7 +103,9 @@ class StripSliderHelper {
                         popup = page.locator(popupSelectors.join(', ')).filter({ visible: true }).first();
                     }
 
-                    if (await popup.isVisible()) {
+                    // Strict Visibility Check: Ensure it has dimensions to avoid false positives
+                    const popupBox = await popup.boundingBox().catch(() => null);
+                    if (await popup.isVisible() && popupBox && popupBox.width > 50 && popupBox.height > 50) {
                         console.log('[StripSliderHelper] Popup visible. Capturing viewport screenshot...');
                         // Use the page-level screenshot to capture the popup in its full context/viewport
                         const page = context.page ? context.page() : context;

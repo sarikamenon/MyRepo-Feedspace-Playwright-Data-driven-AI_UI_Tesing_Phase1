@@ -202,18 +202,50 @@ class ReportHelper {
                                                     <td>${f.feature}</td>
                                                     <td>${uiStatus}</td>
                                                     <td>${configStatus}</td>
-                                                    <td>${f.scenario || 'N/A'}</td>
+                                                    <td>${f.issue || f.scenario || 'N/A'}</td>
                                                     <td><span class="badge ${badgeClass}">${f.status}</span></td>
-                                                    <td>${f.warning || ''}</td>
+                                                    <td>${f.remarks || f.warning || ''}</td>
                                                 </tr>
                                                 `;
         }).join('')}
                                         </tbody>
                                     </table>
-                                 ` : `
-                                    <div style="margin-top:20px; color:#991b1b; background:#fef2f2; padding:15px; border-radius:4px; font-style:italic;">
-                                        <strong>Validation Failed:</strong> ${run.aiAnalysis.error || 'No visual analysis results available for this run.'}
-                                        <br/><small>This is usually due to API Quota limits or Screenshot capture issues.</small>
+                                 ` : (run.status === 'ERROR' ? `
+                                    <div style="margin-top: 20px; color: #92400e; background: #fffbeb; padding: 10px; border-radius: 4px; font-size: 13px;">
+                                        <strong>UI Aesthetics:</strong> Analysis skipped due to engine error.
+                                    </div>
+                                ` : `
+                                    <div style="margin-top: 20px; color: #166534; background: #f0fdf4; padding: 10px; border-radius: 4px; font-size: 13px;">
+                                        <strong>UI Aesthetics:</strong> No visual defects detected.
+                                    </div>
+                                `)}
+
+                                ${run.aiAnalysis.aesthetic_results && run.aiAnalysis.aesthetic_results.length > 0 ? `
+                                    <h4 style="margin-top: 20px; margin-bottom: 10px; color: #333;">UI Aesthetic Checks</h4>
+                                    <table>
+                                        <thead>
+                                            <tr><th>Category</th><th>Issue Details</th><th>Severity</th><th>Status</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            ${run.aiAnalysis.aesthetic_results.map(a => {
+                                                const isPass = a.status === 'PASS';
+                                                const rowClass = isPass ? 'pass-row' : 'fail-row';
+                                                const badgeClass = isPass ? 'pass' : (a.severity === 'High' ? 'error' : 'fail');
+                                                const sevBadge = isPass ? 'warn' : 'warn';
+                                                return `
+                                                <tr class="${rowClass}">
+                                                    <td>${a.category || 'Visual Check'}</td>
+                                                    <td>${a.issue || 'N/A'}</td>
+                                                    <td><span class="badge ${isPass ? 'pass' : 'warn'}">${a.severity || 'N/A'}</span></td>
+                                                    <td><span class="badge ${badgeClass}">${a.status || 'FAIL'}</span></td>
+                                                </tr>
+                                                `;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                ` : `
+                                    <div style="margin-top: 20px; color: #166534; background: #f0fdf4; padding: 10px; border-radius: 4px; font-size: 13px;">
+                                        <strong>UI Aesthetics:</strong> No visual defects detected.
                                     </div>
                                 `}
 

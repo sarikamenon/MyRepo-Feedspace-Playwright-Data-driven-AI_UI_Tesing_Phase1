@@ -44,7 +44,10 @@ const WIDGET_CONFIG_MAP = {
     'SINGLE_SLIDER': 'avatarSliderFeature',
     'MARQUEE_UPDOWN': 'verticalScrollFeature',
     'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-    'FLOATING_TOAST': 'floatingCardsFeature'
+    'FLOATING_TOAST': 'floatingCardsFeature',
+    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
+    'CROSS_SLIDER': 'crossSliderFeature',
+    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature'
 };
 
 /**
@@ -53,20 +56,38 @@ const WIDGET_CONFIG_MAP = {
 async function run() {
     console.log('\n--- Starting Local AI Visual Validation Orchestrator ---');
 
-    let testData;
     try {
-        console.log('[Main] Loading local test data from testData/testUrls.json...');
-        const localPath = path.join(process.cwd(), 'testData', 'testUrls.json');
+        // --- CLI ARGUMENT PARSING ---
+        const args = process.argv.slice(2);
+        const urlArg = args.find(a => a.startsWith('--url='))?.split('=')[1] || (args[args.indexOf('--url') + 1]);
+        const typeArg = args.find(a => a.startsWith('--type='))?.split('=')[1] || (args[args.indexOf('--type') + 1]);
+        const widthArg = args.find(a => a.startsWith('--width='))?.split('=')[1] || (args[args.indexOf('--width') + 1]);
+        const heightArg = args.find(a => a.startsWith('--height='))?.split('=')[1] || (args[args.indexOf('--height') + 1]);
 
-        if (fs.existsSync(localPath)) {
-            const raw = JSON.parse(fs.readFileSync(localPath, 'utf8'));
-            testData = Array.isArray(raw) ? raw : (raw.data || []);
+        this.targetWidth = widthArg ? parseInt(widthArg) : 1920;
+        this.targetHeight = heightArg ? parseInt(heightArg) : 700;
+
+        if (urlArg) {
+            console.log(`[Main] Targeting single URL via CLI: ${urlArg}`);
+            testData = [{
+                url: urlArg,
+                type: typeArg || 'Unknown',
+                configuration: {} // Default empty config
+            }];
         } else {
-            throw new Error('testData/testUrls.json not found. Please create it for local testing.');
+            console.log('[Main] Loading local test data from testData/testUrls.json...');
+            const localPath = path.join(process.cwd(), 'testData', 'testUrls.json');
+
+            if (fs.existsSync(localPath)) {
+                const raw = JSON.parse(fs.readFileSync(localPath, 'utf8'));
+                testData = Array.isArray(raw) ? raw : (raw.data || []);
+            } else {
+                throw new Error('testData/testUrls.json not found. Please create it for local testing.');
+            }
         }
 
         // Filter and clean
-        testData = testData.filter(item => (item.customer_url || item.url) && (item.widget_type || item.type));
+        testData = testData.filter(item => (item.customer_url || item.url));
 
     } catch (e) {
         console.error(`[Main] Local Config Error: ${e.message}`);
@@ -109,7 +130,7 @@ async function run() {
 
             // Create a fresh context for each attempt to avoid state contamination or session crashes
             const context = await browser.newContext({
-                viewport: { width: 1920, height: 1080 },
+                viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 700 },
                 deviceScaleFactor: 1,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 locale: 'en-US',
@@ -121,6 +142,7 @@ async function run() {
 
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
+            helper.expectedType = typeName;
 
             try {
                 if (urlAttempt > 1) {

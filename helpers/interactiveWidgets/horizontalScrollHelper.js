@@ -51,10 +51,27 @@ class HorizontalScrollHelper {
             let rowCount = await rows.count();
 
             if (rowCount === 0) {
-                console.log('[HorizontalScrollHelper] Primary row selectors failed. Searching for containers with >1 child (targeted)...');
-                // Target containers that might be the scrolling wrapper
-                const containers = context.locator('div, section, ul').filter({ visible: true });
-                const count = await containers.count().catch(() => 0);
+                // 🛡️ REWRITE: High-Speed Safe-Depth Search
+                const containerSelectors = [
+                    '.feedspace-shadow-container',
+                    '.feedspace-embed-main',
+                    '.feedspace-elements-wrapper',
+                    '.feedspace-left-right-shadow',
+                    '> div',
+                    '> section',
+                    '> ul',
+                    '> * > div'
+                ];
+                
+                let containers = context.locator(containerSelectors.join(', ')).filter({ visible: true });
+                let count = await containers.count().catch(() => 0);
+
+                // 🛡️ TIER 3 FALLBACK: Guarded Deep Scan (Infinite Loop Search)
+                if (count === 0) {
+                    console.log('[HorizontalScrollHelper] Tier 1 & 2 failed. Triggering Guarded Deep Scan (Limit 100)...');
+                    containers = context.locator('div, section, ul').filter({ visible: true });
+                    count = Math.min(await containers.count().catch(() => 0), 100);
+                }
 
                 for (let i = 0; i < Math.min(count, 50); i++) {
                     const candidate = containers.nth(i);
@@ -66,7 +83,7 @@ class HorizontalScrollHelper {
                     if (!isInside) continue;
 
                     const childCount = await candidate.locator('> *').count().catch(() => 0);
-                    if (childCount > 1) {
+                    if (childCount >= 1) {
                         // Check if children are side-by-side (approximate)
                         const box1 = await candidate.locator('> *').nth(0).boundingBox().catch(() => null);
                         const box2 = await candidate.locator('> *').nth(1).boundingBox().catch(() => null);

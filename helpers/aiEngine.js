@@ -15,7 +15,7 @@ class AIEngine {
         this.initialDelay = 5000; // 5s initial delay
     }
 
-    async analyzeScreenshot(imageBuffers, config, widgetType, staticFeatures) {
+    async analyzeScreenshot(imageBuffers, config, widgetType, staticFeatures, geometricWarnings) {
         if (!this.apiKey) {
             return this.getMockResult(widgetType);
         }
@@ -27,7 +27,7 @@ class AIEngine {
             let text = "";
             try {
                 attempts++;
-                const prompt = PromptBuilder.build(widgetType, config, staticFeatures, buffers.length > 1);
+                const prompt = PromptBuilder.build(widgetType, config, staticFeatures, buffers.length > 1, geometricWarnings);
 
                 const imageParts = buffers.map(buffer => ({
                     inlineData: {
@@ -36,13 +36,37 @@ class AIEngine {
                     },
                 }));
 
-                console.log(`[AIEngine] Sending ${buffers.length} screenshot(s) to Gemini for ${widgetType} validation (Attempt ${attempts})...`);
+                console.log(`[AIEngine] Sending screenshot to Gemini for ${widgetType} validation (Attempt ${attempts})...`);
                 const result = await this.model.generateContent([prompt, ...imageParts]);
                 const response = await result.response;
                 text = response.text();
 
-                const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-                const aiResults = JSON.parse(cleanText);
+                // Robust JSON Extraction: Find the outermost { ... } block
+                // This handles conversational preamble like "Okay, here is the JSON..." 
+                const extractJson = (str) => {
+                    const firstBrace = str.indexOf('{');
+                    const lastBrace = str.lastIndexOf('}');
+                    if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) return null;
+                    return str.substring(firstBrace, lastBrace + 1);
+                };
+
+                const cleanText = extractJson(text);
+                if (!cleanText) {
+                    throw new Error(`AI response did not contain a valid JSON block. Raw text: "${text.substring(0, 100)}..."`);
+                }
+
+                let aiResults;
+                try {
+                    aiResults = JSON.parse(cleanText);
+                } catch (e) {
+                    // Fallback: If outer block is invalid (prose in middle?), try to find markdown block
+                    const mdMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+                    if (mdMatch) {
+                        aiResults = JSON.parse(mdMatch[1]);
+                    } else {
+                        throw new Error(`Failed to parse extracted JSON: ${e.message}. Raw: "${cleanText.substring(0, 100)}..."`);
+                    }
+                }
 
                 // Post-process: Calculate status in JS for stability
                 return this.processResults(aiResults, config, widgetType, staticFeatures);
@@ -90,10 +114,28 @@ class AIEngine {
     }
 
     processResults(aiData, config, widgetType, staticFeatures) {
-        // Emergency Revert: Allow AI to handle status for demo
         if (!aiData || !aiData.feature_results) return aiData;
 
-        // Recalculate overall status based on AI's PASS/FAIL
+        // 1. Strict Filter: only include features defined in the config (staticFeatures)
+        if (Array.isArray(staticFeatures) && staticFeatures.length > 0) {
+            aiData.feature_results = aiData.feature_results.filter(res => {
+                const normalize = (str) => str.toLowerCase()
+                    .replace(/[_\- ]/g, '')
+                    .replace(/grey/g, 'gray')
+                    .replace(/grayscale/g, 'gray');
+
+                const normAI = normalize(res.feature);
+                return staticFeatures.some(sf => {
+                    const normSF = normalize(sf);
+                    // Strict term match or specific gray/grey synonym match
+                    return normSF === normAI || 
+                           (normSF.includes('gray') && normAI.includes('gray') && 
+                            (normAI.length - normSF.length < 10)); // Heuristic to allow "Displays Gray Mode" vs "Gray Mode"
+                });
+            });
+        }
+
+        // 2. Recalculate overall status based on filtered failures
         const hasFailures = aiData.feature_results.some(f => f.status === "FAIL");
         aiData.overall_status = hasFailures ? "FAIL" : "PASS";
 
