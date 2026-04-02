@@ -143,8 +143,11 @@ class PlaywrightHelper {
                     const t = parseInt(urlTypeMatch[1]);
                     const interceptedType = WidgetDetector.identify({ type: t });
                     if (interceptedType !== 'Unknown') {
-                        console.log(`[PlaywrightHelper] 📡 Network (URL param): ${interceptedType} (ID: ${t})`);
-                        this.detectedNetworkTypes.add(interceptedType);
+                        const isTarget = this.expectedType === 'Unknown' || WidgetDetector.isSameType(interceptedType, this.expectedType);
+                        if (isTarget) {
+                            console.log(`[PlaywrightHelper] 📡 Network (URL param): ${interceptedType} (ID: ${t})`);
+                            this.detectedNetworkTypes.add(interceptedType);
+                        }
                     }
                 }
 
@@ -162,14 +165,12 @@ class PlaywrightHelper {
                     const results = WidgetDetector.collectFromNestedPayload(json);
 
                     for (const { typeName, uniqueWidgetId, data } of results) {
-                        console.log(`[PlaywrightHelper] 📡 Network (JSON body): ${typeName}`);
-                        this.detectedNetworkTypes.add(typeName);
+                        const isTarget = this.expectedType === 'Unknown' || WidgetDetector.isSameType(typeName, this.expectedType);
 
-                        // TRUTH DATA: Save the live intercepted config so the AI can validate against it.
-                        // We prefer the 'data' sub-object if present (where most features live).
-                        
-                        // FIX: Autodiscovery for Unknown types (e.g. CLI runs without --type)
-                        if (this.expectedType === 'Unknown' || WidgetDetector.isSameType(typeName, this.expectedType)) {
+                        if (isTarget) {
+                            console.log(`[PlaywrightHelper] 📡 Network (JSON body): ${typeName}`);
+                            this.detectedNetworkTypes.add(typeName);
+
                             if (this.expectedType === 'Unknown') {
                                 console.log(`[PlaywrightHelper] 🕵️  Autodiscovered type: ${typeName}. Updating expectedType.`);
                                 this.expectedType = typeName;
@@ -193,8 +194,11 @@ class PlaywrightHelper {
                         const t = parseInt(match[1]);
                         const interceptedType = WidgetDetector.identify({ type: t });
                         if (interceptedType !== 'Unknown') {
-                            console.log(`[PlaywrightHelper] 📡 Network (regex fallback): ${interceptedType} (ID: ${t})`);
-                            this.detectedNetworkTypes.add(interceptedType);
+                            const isTarget = this.expectedType === 'Unknown' || WidgetDetector.isSameType(interceptedType, this.expectedType);
+                            if (isTarget) {
+                                console.log(`[PlaywrightHelper] 📡 Network (regex fallback): ${interceptedType} (ID: ${t})`);
+                                this.detectedNetworkTypes.add(interceptedType);
+                            }
                         }
                     }
                 }
@@ -247,7 +251,7 @@ class PlaywrightHelper {
 
     async _waitForFeedspaceScript() {
         console.log('[PlaywrightHelper] Waiting for Feedspace script to manifest (up to 45s)...');
-        
+
         // --- SMART SCROLL FALLBACK ---
         // Trigger lazy-loaded scripts by scrolling the page early.
         await this._smartScroll();
@@ -259,7 +263,7 @@ class PlaywrightHelper {
         while (Date.now() - startTime < 45000) {
             // Check network state
             const networkHit = this.detectedNetworkTypes.size > 0;
-            
+
             // Check DOM state
             const scriptTag = await this.page.evaluate(() => {
                 return !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"], .feedspace-embed');
@@ -272,7 +276,7 @@ class PlaywrightHelper {
             }
             await this._sleep(2000);
         }
-        
+
         if (!found) {
             console.warn('[PlaywrightHelper] ⚠️ No explicit Feedspace activity seen in 45s — proceeding with stabilization.');
         }
@@ -294,13 +298,13 @@ class PlaywrightHelper {
                 const delay = 300;
                 const totalHeight = document.body.scrollHeight;
                 let currentPos = 0;
-                
+
                 while (currentPos < totalHeight) {
                     window.scrollBy(0, scrollStep);
                     currentPos += scrollStep;
                     await new Promise(r => setTimeout(r, delay));
                 }
-                
+
                 // Jump back to top
                 window.scrollTo(0, 0);
                 await new Promise(r => setTimeout(r, 500));
@@ -315,7 +319,7 @@ class PlaywrightHelper {
      */
     async validateWithAI(staticFeatures) {
         this.staticFeatures = staticFeatures;
-        
+
         // --- UNIVERSAL ISOLATION LAYER ---
         // Force-load widget-specific features if a type is identified.
         // This ensures absolute feature isolation across all widget types.
@@ -398,12 +402,12 @@ class PlaywrightHelper {
                     root.querySelectorAll(selString).forEach(el => {
                         if (!visited.has(el)) {
                             visited.add(el);
-                            
+
                             // Ensure element has a way to be identified in the main loop
                             let id = el.id || el.getAttribute('unique_widget_id') ||
-                                     el.getAttribute('data-id') ||
-                                     el.getAttribute('data-widget-type');
-                            
+                                el.getAttribute('data-id') ||
+                                el.getAttribute('data-widget-type');
+
                             let isTemp = false;
                             if (!id) {
                                 id = 'fs_temp_' + Math.random().toString(36).substr(2, 9);
@@ -429,10 +433,10 @@ class PlaywrightHelper {
             let detectedType = 'Unknown';
 
             for (const cInfo of candidatesFound) {
-                const selector = cInfo.isTemp 
+                const selector = cInfo.isTemp
                     ? `[data-fs-temp-id="${cInfo.id}"]`
                     : `[id="${cInfo.id}"], [unique_widget_id="${cInfo.id}"], [data-id="${cInfo.id}"], [data-widget-type="${cInfo.id}"]`;
-                
+
                 const candLocator = selector ? this.page.locator(selector).first() : null;
 
                 if (candLocator) {
@@ -488,7 +492,7 @@ class PlaywrightHelper {
 
             // Final type resolution
             const isDomMatched = detectedType !== 'Unknown' && WidgetDetector.isSameType(detectedType, this.expectedType);
-            
+
             if (isNetworkMatched) {
                 this.widgetType = this.expectedType;
             } else if (isDomMatched) {
@@ -516,8 +520,8 @@ class PlaywrightHelper {
                 this.widgetType = 'CROSS_SLIDER';
             }
 
-            const isMatched = isNetworkMatched || 
-                             (this.widgetType !== 'Unknown' && WidgetDetector.isSameType(this.widgetType, this.expectedType));
+            const isMatched = isNetworkMatched ||
+                (this.widgetType !== 'Unknown' && WidgetDetector.isSameType(this.widgetType, this.expectedType));
 
             this.typeMatchResult = {
                 expected: this.expectedType,
@@ -549,7 +553,7 @@ class PlaywrightHelper {
                             const text = el.innerText ? el.innerText.toLowerCase() : '';
                             const isCookie = text.includes('cookie') || text.includes('accept');
                             const isTrustpilot = el.className && typeof el.className === 'string' && el.className.includes('trustpilot');
-                            
+
                             if (isCookie || isTrustpilot) {
                                 el.style.setProperty('display', 'none', 'important');
                             }
@@ -578,7 +582,7 @@ class PlaywrightHelper {
                 if (!box || box.height === 0) {
                     console.warn(`[PlaywrightHelper] Widget locator reached but height is still 0 after 10s.`);
                 }
-                
+
                 await locator.scrollIntoViewIfNeeded().catch(() => { });
                 await this._sleep(1000);
             }

@@ -1,153 +1,276 @@
+'use strict';
+
 class CompanyLogoSliderHelper {
-    static async interact(page, widgetLocator, captureCallback) {
-        console.log('[CompanyLogoSliderHelper] Starting interactions...');
+    static async interact(page, widgetLocator, geometricWarnings) {
+        console.log('[CompanyLogoSliderHelper] Starting sequential interactions...');
 
         const screenshotBuffers = [];
 
-        // 1. Initial entire page capture/widget capture -> to check Gray Mode in scrolling state
+        // ── 1. Scroll widget into view + initial capture ────────────────────
         try {
-            console.log('[CompanyLogoSliderHelper] Waiting for reviews and widget content...');
-            await widgetLocator.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' })).catch(() => {});
+            await widgetLocator.evaluate(el =>
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            ).catch(() => { });
             await page.waitForTimeout(2000);
 
-            const contentSelector = '.feedspace-embed-card, .feedspace-review-card, .fe-card, [class*="card"], .company-logo-card, img';
-            
-            try {
-                await widgetLocator.locator(contentSelector).first().waitFor({
-                    state: 'visible',
-                    timeout: 10000
-                });
-                console.log('[CompanyLogoSliderHelper] Logo slider content detected.');
-            } catch (e) {
-                console.warn('[CompanyLogoSliderHelper] Content detection timed out or not found.');
-            }
+            await widgetLocator
+                .locator('.feedspace-company-logo, .fe-logo, img')
+                .first()
+                .waitFor({ state: 'visible', timeout: 10000 })
+                .catch(() => { });
 
-            await page.waitForTimeout(3000);
-
-            // Capture the default view with padding context
-            console.log('[CompanyLogoSliderHelper] Capturing default logo slider view with context padding...');
             const box = await widgetLocator.boundingBox();
             if (box) {
-                const clip = {
-                    x: Math.max(0, box.x - 100),
-                    y: Math.max(0, box.y - 100),
-                    width: box.width + 200,
-                    height: box.height + 200
-                };
-                const defaultShot = await page.screenshot({ clip, animations: 'disabled' }).catch(() => null);
-                if (defaultShot) {
-                    screenshotBuffers.push(defaultShot);
-                }
+                const shot = await page.screenshot({
+                    clip: {
+                        x: Math.max(0, box.x - 40),
+                        y: Math.max(0, box.y - 20),
+                        width: box.width + 80,
+                        height: box.height + 40
+                    },
+                    animations: 'disabled'
+                }).catch(() => null);
+                if (shot) screenshotBuffers.push(shot);
             }
         } catch (e) {
-            console.warn(`[CompanyLogoSliderHelper] Default view capture failed: ${e.message}`);
+            console.warn(`[CompanyLogoSliderHelper] Initial capture failed: ${e.message}`);
         }
 
-        // 2. Interact with individual slider reviews to expand the popup using robust Shadow DFS
+        // ── 2. Discover cards WITHOUT freezing animation ─────────────────────
+        // Freezing leaves cards at stale mid-scroll coordinates.
+        // Instead: pause via CSS class on the ROOT only, let the browser
+        // reflow, THEN read coordinates — cards will be at rendered positions.
         try {
-            const discoveryTempId = 'fs_root_' + Math.random().toString(36).substr(2, 9);
-            await widgetLocator.evaluate((el, id) => el.setAttribute('data-fs-discovery-root', id), discoveryTempId);
-            
+            const discoveryTempId = 'fs_logo_root_' + Date.now();
+
+            await widgetLocator.evaluate((el, id) => {
+                el.setAttribute('data-fs-discovery-root', id);
+
+                // Inject a pause style scoped to this widget only
+                const style = document.createElement('style');
+                style.id = id + '_style';
+                style.textContent = `
+                    [data-fs-discovery-root="${id}"] *,
+                    [data-fs-discovery-root="${id}"] *::before,
+                    [data-fs-discovery-root="${id}"] *::after {
+                        animation-play-state: paused !important;
+                        transition: none !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }, discoveryTempId).catch(() => { });
+
+            // Give browser one full frame to reflow after pausing
+            await page.waitForTimeout(600);
+
             const cardSelectors = [
                 '.feedspace-company-logo',
+                '.feedspace-company-logo-slider-item',
                 '.feedspace-logo',
                 '.fe-logo',
-                '.company-logo-card', 
-                '.feedspace-embed-card', 
-                '.feedspace-review-card', 
-                '.fe-card', 
-                '[class*="card"]',
-                'img'
+                '.company-logo-card'
             ];
 
-            const cards = await page.evaluate(async ({ tempId, selectors }) => {
-                const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`) || 
-                             Array.from(document.querySelectorAll('*'))
-                                  .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`))
-                                  ?.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`);
-                
+            const uniqueTargets = await page.evaluate(({ tempId, selectors }) => {
+                const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`);
                 if (!root) return [];
 
+                const rootRect = root.getBoundingClientRect();
                 const results = [];
                 const visited = new Set();
 
-                const findInRoot = (node) => {
+                function scan(node) {
                     if (!node) return;
-                    
                     selectors.forEach(s => {
-                        try {
-                            const matches = node.querySelectorAll(s);
-                            matches.forEach(m => {
-                                if (!visited.has(m)) {
-                                    visited.add(m);
-                                    const box = m.getBoundingClientRect();
-                                    if (box.width > 0 && box.height > 0) {
-                                        let id = m.getAttribute('data-fs-temp-id');
-                                        if (!id) {
-                                            id = 'fs_logo_' + Math.random().toString(36).substr(2, 9);
-                                            m.setAttribute('data-fs-temp-id', id);
-                                        }
-                                        results.push({ id });
-                                    }
-                                }
-                            });
-                        } catch(e){}
+                        node.querySelectorAll(s).forEach(m => {
+                            if (visited.has(m)) return;
+                            visited.add(m);
+                            const rect = m.getBoundingClientRect();
+                            const style = window.getComputedStyle(m);
+
+                            const centerX = rect.left + rect.width / 2;
+                            const centerY = rect.top + rect.height / 2;
+
+                            if (
+                                rect.width > 20 &&
+                                rect.height > 20 &&
+                                centerX >= rootRect.left &&
+                                centerX <= rootRect.right &&
+                                centerY >= rootRect.top &&
+                                centerY <= rootRect.bottom &&
+                                style.visibility !== 'hidden' &&
+                                style.display !== 'none' &&
+                                parseFloat(style.opacity) > 0 &&
+                                style.pointerEvents !== 'none'
+                            ) {
+                                // ── DYNAMIC TARGETING ID ────────────────────────────
+                                const targetId = 'logo_target_' + Math.random().toString(36).substr(2, 9);
+                                m.setAttribute('data-fs-interaction-id', targetId);
+
+                                results.push({
+                                    targetId,
+                                    x: centerX,
+                                    y: centerY,
+                                    rawX: rect.left,
+                                    width: rect.width,
+                                    height: rect.height
+                                });
+                            }
+                        });
                     });
-
-                    Array.from(node.children || []).forEach(child => {
-                        findInRoot(child);
-                        if (child.shadowRoot) findInRoot(child.shadowRoot);
+                    Array.from(node.children || []).forEach(c => {
+                        scan(c);
+                        if (c.shadowRoot) scan(c.shadowRoot);
                     });
-                };
+                }
+                scan(root);
 
-                findInRoot(root);
-                if (root.shadowRoot) findInRoot(root.shadowRoot);
+                const sorted = results.sort((a, b) => a.rawX - b.rawX);
 
-                return results;
-            }, { tempId: discoveryTempId, selectors: cardSelectors });
-
-            const interactCount = Math.min(cards.length, 3); // check up to 3 cards
-            console.log(`[CompanyLogoSliderHelper] Found ${cards.length} valid logo targets in Shadow DOM, interacting with ${interactCount}...`);
-
-            for (let i = 0; i < interactCount; i++) {
-                const target = cards[i];
-                console.log(`[CompanyLogoSliderHelper] Clicking logo/card ${i + 1}/${interactCount}...`);
-                
-                const selector = `[data-fs-temp-id="${target.id}"]`;
-
-                await page.evaluate((sel) => {
-                    const el = document.querySelector(sel) || 
-                               Array.from(document.querySelectorAll('*'))
-                                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
-                                    ?.shadowRoot.querySelector(sel);
-                    if (el) {
-                        el.scrollIntoView({ block: 'center' });
-                        
-                        // Strategy 1: Click the element itself
-                        el.click();
-                        
-                        // Strategy 2: If the element is a wrapper, click the inner image or link
-                        const innerTarget = el.querySelector('img, a, button, [class*="logo"]');
-                        if (innerTarget) {
-                            innerTarget.click();
-                        }
-                    }
-                }, selector);
-
-                await page.waitForTimeout(3000); // wait for modal to expand
-
-                console.log(`[CompanyLogoSliderHelper] Capturing expanded view for logo card ${i + 1}...`);
-                const expandedShot = await page.screenshot({ fullPage: false, animations: 'disabled' }).catch(() => null);
-                if (expandedShot) {
-                    screenshotBuffers.push(expandedShot);
+                // Deduplicate clones: keep first occurrence per X cluster
+                const deduped = [];
+                for (const candidate of sorted) {
+                    const isDupe = deduped.some(
+                        kept => Math.abs(kept.rawX - candidate.rawX) < candidate.width * 0.5
+                    );
+                    if (!isDupe) deduped.push(candidate);
                 }
 
-                // Close popup by clicking away from the center
-                await page.mouse.click(10, 10);
-                await page.waitForTimeout(1000);
+                const halfLen = Math.floor(sorted.length / 2);
+                return deduped.length >= 2 ? deduped : sorted.slice(0, halfLen);
+
+            },
+
+
+                { tempId: discoveryTempId, selectors: cardSelectors });
+
+            console.log(`[CompanyLogoSliderHelper] Found ${uniqueTargets.length} unique cards`);
+            uniqueTargets.forEach((t, i) =>
+                console.log(`  Card ${i + 1}: x=${Math.round(t.x)} y=${Math.round(t.y)} (${Math.round(t.width)}x${Math.round(t.height)})`)
+            );
+
+            // ── 3. Sequential click → capture → close ───────────────────────
+            for (let i = 0; i < uniqueTargets.length; i++) {
+                const target = uniqueTargets[i];
+                console.log(`[CompanyLogoSliderHelper] Card ${i + 1}/${uniqueTargets.length} at (${Math.round(target.x)}, ${Math.round(target.y)})`);
+
+                const cardPromise = (async () => {
+                    try {
+                        // ── 3. PRE-INTERACTION RESET ──────────────────────
+                        await page.evaluate(() => {
+                            function hideAll(node) {
+                                if (!node) return;
+                                node.querySelectorAll('.feedspace-company-logo-review-popup, [class*="review-popup"], [class*="expanded"]').forEach(p => {
+                                    p.style.setProperty('display', 'none', 'important');
+                                    p.style.setProperty('opacity', '0', 'important');
+                                });
+                                Array.from(node.children || []).forEach(c => {
+                                    hideAll(c);
+                                    if (c.shadowRoot) hideAll(c.shadowRoot);
+                                });
+                            }
+                            hideAll(document);
+                        }).catch(() => { });
+                        await page.mouse.click(20, 20);
+                        await page.waitForTimeout(400);
+
+                        await page.mouse.move(target.x, target.y);
+                        await page.waitForTimeout(400);
+
+                        // ── DUAL TRIGGER CLICK ───────────────────────────
+                        const targetLocator = widgetLocator.locator(`[data-fs-interaction-id="${target.targetId}"]`);
+                        await targetLocator.click({ force: true, timeout: 3000 }).catch(() => { });
+                        // Fallback JS click if expansion delayed
+                        await targetLocator.evaluate(el => el.click()).catch(() => { });
+                        await page.waitForTimeout(1000);
+
+                        // ── FLAT SHADOW DISCOVERY ──────────────────────────
+                        let expanded = await page.evaluate(() => {
+                            function getPopups(root) {
+                                let found = Array.from(root.querySelectorAll('.feedspace-company-logo-review-popup, [class*="review-popup"], [class*="expanded"]'));
+                                root.querySelectorAll('*').forEach(el => {
+                                    if (el.shadowRoot) found = found.concat(getPopups(el.shadowRoot));
+                                });
+                                return found;
+                            }
+                            const popups = getPopups(document);
+                            return popups.some(p => {
+                                const s = window.getComputedStyle(p);
+                                return (p.innerText || '').trim().length > 20 &&
+                                       s.display !== 'none' &&
+                                       s.visibility !== 'hidden' &&
+                                       parseFloat(s.opacity) > 0.1;
+                            });
+                        }).catch(() => false);
+
+                        if (!expanded) {
+                            console.warn(`[CompanyLogoSliderHelper] Card ${i + 1}: nudging hidden popup...`);
+                            await page.evaluate(({ targetId }) => {
+                                // Deep ID discovery searches ALL shadow roots
+                                function findDeepId(node, id) {
+                                    if (!node) return null;
+                                    const m = node.querySelector(`[data-fs-interaction-id="${id}"]`);
+                                    if (m) return m;
+                                    for (const child of Array.from(node.children || [])) {
+                                        const res = findDeepId(child, id) || (child.shadowRoot ? findDeepId(child.shadowRoot, id) : null);
+                                        if (res) return res;
+                                    }
+                                    return null;
+                                }
+                                const item = findDeepId(document, targetId);
+                                if (item) {
+                                    const p = item.querySelector('.feedspace-company-logo-review-popup, [class*="review-popup"]');
+                                    if (p) {
+                                        p.style.setProperty('opacity', '1', 'important');
+                                        p.style.setProperty('visibility', 'visible', 'important');
+                                        p.style.setProperty('height', 'auto', 'important');
+                                        p.style.setProperty('display', 'block', 'important');
+                                    }
+                                }
+                            }, { targetId: target.targetId }).catch(() => { });
+                            await page.waitForTimeout(800);
+                        }
+
+                        // ── INSTANT BOUNDING BOX (No Stability Hang) ──────
+                        const widgetRect = await widgetLocator.evaluate(el => {
+                            const r = el.getBoundingClientRect();
+                            return { x: r.x, y: r.y, width: r.width, height: r.height };
+                        }).catch(() => null);
+
+                        if (widgetRect) {
+                            const clip = {
+                                x: Math.max(0, Math.floor(widgetRect.x - 40)),
+                                y: Math.max(0, Math.floor(widgetRect.y - 20)),
+                                width: Math.min(Math.ceil(widgetRect.width + 80), 1400),
+                                height: Math.min(Math.ceil(widgetRect.height + 800), 2000)
+                            };
+                            const shot = await page.screenshot({ clip, animations: 'disabled', timeout: 4000 }).catch(() => null);
+                            if (shot) screenshotBuffers.push(shot);
+                        }
+
+                        // ── DISMISSAL ─────────────────────────────────────
+                        await page.keyboard.press('Escape').catch(() => { });
+                        await page.mouse.click(20, 20);
+                        await page.waitForTimeout(500);
+
+                    } catch (e) {
+                        console.warn(`[CompanyLogoSliderHelper] Card ${i + 1} inner fail: ${e.message}`);
+                    }
+                })();
+
+                // Global Card Timeout: Max 15s per card interaction
+                const timeoutPromise = new Promise(resolve => setTimeout(resolve, 15000));
+                await Promise.race([cardPromise, timeoutPromise]);
+                console.log(`[CompanyLogoSliderHelper] Card ${i + 1} cycle complete`);
             }
+
+            // Cleanup injected pause style
+            await page.evaluate(id => {
+                document.getElementById(id + '_style')?.remove();
+            }, discoveryTempId).catch(() => { });
+
         } catch (err) {
-            console.warn(`[CompanyLogoSliderHelper] Interaction mapping failed: ${err.message}`);
+            console.warn(`[CompanyLogoSliderHelper] Critical failure: ${err.message}`);
         }
 
         return screenshotBuffers;
