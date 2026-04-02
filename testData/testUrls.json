@@ -1,8 +1,8 @@
 {
     "data": [
         {
-            "url": "https://keywords.am/",
-            "type": "avatar_group",
+            "url": "https://www.feedspace.io/widget/a88a9cdd-8eb7-4138-a94d-f0f944911aa7?info=1",
+            "type": "company_logo_slider",
             "configurations": {
                 "font": {
                     "name": "auto capture",
@@ -39,6 +39,7 @@
                     "star_rating_border_color": "#EAB308",
                     "star_rating_background_color": "#E5E7EB"
                 },
+                "enable_grey_mode": "0",
                 "enable_load_more": "0",
                 "show_full_review": "0",
                 "marquee_direction": "alter",

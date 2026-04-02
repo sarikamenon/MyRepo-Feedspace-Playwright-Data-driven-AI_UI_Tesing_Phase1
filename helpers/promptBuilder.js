@@ -17,7 +17,8 @@ class PromptBuilder {
       "Review Card Border & Shadow": ["is_show_border", "is_show_shadow"],
       "Show Star Ratings": "show_star_ratings",
       "Widget position": "widget_position",
-      "Show Load More Button": "enable_load_more"
+      "Show Load More Button": "enable_load_more",
+      "Displays Gray mode": "enable_grey_mode"
     };
     // Features where "1" means HIDDEN and "0" means VISIBLE
     const invertedFeatures = {
@@ -153,9 +154,9 @@ RULE: If Q1 is CLIPPED, Q2 is "ONLY ONE BAR VISIBLE", Q3 is CLIPPED, or Q4 is "S
 
       COMPANY_LOGO_SLIDER: `
 **LOGO SLIDER — LAYOUT PRE-ANALYSIS (answer before writing JSON):**
-Q1. Are the scrolling logos fully visible, or are they sliced at the top/bottom container edges? → [FULLY VISIBLE / SLICED]
 Q2. **BROKEN TOKEN CHECK**: Can you see "(t)(t)(t)" or "(t)" tokens in the logo names or labels? → [YES - BROKEN TOKENS / NO - NORMAL TEXT]
-**MANDATORY FAIL RULE**: If Q1 is SLICED or Q2 is YES → status MUST be "FAIL", severity "CRITICAL".
+Q3. **COLOR SPECTRUM AUDIT**: Do the logos appear in full color, or are they specifically rendered in "Gray mode" (Grayscale / Black-and-White)? → [FULL COLOR / GRAYSCALE / B&W]
+**MANDATORY FAIL RULE**: If Q1 is SLICED, Q2 is YES, or Q3 mismatches 'enable_grey_mode' config → status MUST be "FAIL", severity "CRITICAL".
 `,
 
       CAROUSEL_SLIDER: `
@@ -451,6 +452,21 @@ SECTION 2: WIDGET-SPECIFIC SCANNING RULES
 
 **COMPANY_LOGO_SLIDER**:
 - **🚨 BROKEN TOKEN CHECK (CRITICAL)**: Scan all text labels. If you see "(t)(t)(t)" tokens, FAIL "C. CONTENT & TEXT RENDERING".
+- **🚨 MANDATORY STEP 0: THE SPECTRUM ANCHOR (PIXEL SUPREMACY)**:
+  - **COLOR REFERENCE**: Locate the **Feedspace Branding logo** or any **Blue/Red buttons** in the widget. These are your "True Color" reference points.
+  - **SATURATION COMPARISON**: Compare the scrolling logos to these references. If the logos appear as shades of gray/black/white while the buttons/branding are vibrant, THE LOGOS ARE IN GRAY MODE.
+  - **REPORTING RULE**: If your Color Reference shows saturation but the logos do not -> YOU MUST mark "Displays Gray mode" as **Visible**. Do NOT guess based on config.
+- **🔍 THE MICROSCOPIC DATE SCAN (DISCOVERY SUPREMACY)**:
+  - **ZONE OF INTEREST**: Look EXCLUSIVELY at the small white space (usually 10-15px height) directly BELOW the logo image and ABOVE the 'Get Started' button (arrow ↗).
+  - **SINGLE-HIT RULE**: If 'Month DD, YYYY' is visible in **EVEN ONE** of the provided images, the feature is **Visible**. You MUST ignore screenshots where the date is cut off or missing.
+  - **PERCEPTION RULE**: If ANY text characters exist in this specific gap, "Show Review Date" IS **Visible**. You MUST quote the string (e.g., 'October 12, 2023') in your remarks.
+- **GRAY-SPECTRUM AUDIT & WIDGET SPEC**:
+  1. If logos have ZERO color saturation (Grayscale/B&W) -> Mark "Displays Gray mode" as **Visible**.
+  2. If logos show ANY primary colors -> Mark "Displays Gray mode" as **Absent**. 
+  3. Comparison Logic: After determining visibility from pixels, check config **enable_grey_mode**. 
+     - If (UI: Visible) + (Config: 1) -> Pass.
+     - If (UI: Absent) + (Config: 1) -> FAIL Category F.
+     - If (UI: Visible) + (Config: 0) -> FAIL Category F.
 - **ANCHOR-BASED POPUP SCAN**: A white card appearing over the logo strip (usually Center or Bottom-Center quadrant) IS a popup. When visible, ignore any "(t)" tokens and scan DOWNWARDS from the top of the card:
   1. Skip the media/image area.
   2. Find the **Review Date**: Look for small gray text (strictly format 'Month DD, YYYY') immediately below the media but above the CTA. YOU MUST explicitly quote the date string in your remarks.
@@ -539,8 +555,8 @@ B. ELEMENT CONTAINMENT
 - Very long words or unbroken text do not break layout
 
 C. CONTENT & TEXT RENDERING
-- **CONTENT COMPLETENESS (CRITICAL)**: Content must be FULLY rendered. If text is cut-off at the bottom edge (truncation) without an aesthetic ellipsis, YOU MUST FAIL THIS CATEGORY. Incomplete text = Broken Rendering.
 - **GHOST CARDS (CRITICAL / PRIORITY #1)**: If you see a card box (container) but its interior appears empty or text is invisible (white-on-white), YOU MUST FAIL THIS CATEGORY IMMEDIATELY. This is the most severe rendering error possible.
+- **BROKEN TOKENS / RAW CODE**: Look closely at the text payload. If you see raw placeholder tokens, unrendered code, or weird repeating structural characters like "(t) (t) (t)" instead of actual content, YOU MUST FAIL THIS CATEGORY.
 - Long text truncated properly with ellipsis (no text cut abruptly midway vertically without visual fade)
 - Emojis/special characters do not overflow
 - Review text clamped at configured lines with ellipsis
@@ -650,9 +666,11 @@ SECTION 7: REPORTING LOGIC & JSON CONTRACT
 ============================================================
 Use the following logic to determine the "Status" for features in Section 5:
 - (UI: Visible) + (Config: Visible) => PASS
-- (UI: Visible) + (Config: Absent)  => FAIL
+- (UI: Visible) + (Config: Absent/Missing) => FAIL (Unintended Feature / Leakage)
 - (UI: Absent)  + (Config: Visible) => FAIL
-- (UI: Absent)  + (Config: Absent)  => PASS
+- (UI: Absent)  + (Config: Absent/Missing)  => PASS
+
+🚨 **MISSING CONFIG RULE**: If a configuration key for a feature listed in Section 5 is MISSING or UNDEFINED in the provided data, YOU MUST assume the expected state is **"Absent"**. If you see the feature in the pixels, you MUST report it as **"Visible"** and flag it as a **FAIL**.
 
     **AESTHETIC REPORTING INSTRUCTIONS**:
     - **AESTHETIC FAILURES ARE ABSOLUTE**: If you see a layout defect, cropped card, overlapping text, or any aesthetic violation in **EVEN ONE** of the provided screenshots, you MUST fail that category. Do not pass it just because another screenshot in the batch looks correct.
@@ -674,7 +692,7 @@ Use the following logic to determine the "Status" for features in Section 5:
       → "No visual defects detected"
 
     - **ZERO TOLERANCE (RENDERING)**: If any "GHOST CARD CHECK" (Q7) or "INVISIBLE LINK CHECK" (Q6) triggered a YES result, you are FORBIDDEN from marking "C. CONTENT & TEXT RENDERING" or "F. THEME & COLOR VISIBILITY" as PASS. You must report: "Card body or functional text is invisible causing fatal rendering failure".
-    - **COUPLED-FAULT RULE (MANDATORY)**: If you fail Category A or G for clipping/truncation, you MUST also fail Category C and Category F. Truncation = Incomplete Content = Lack of Visibility. You are FORBIDDEN from reporting "No visual defects detected" for Content or Theme if the card is physically cut off.
+    - **COUPLED-FAULT RULE (MANDATORY)**: If you fail Category A or G for clipping/truncation, you MUST also fail Category F. Truncation = Lack of Visibility. You are FORBIDDEN from reporting "No visual defects detected" for Theme/Visibility if the card is physically cut off.
     - **MULTI-FAULT REPORTING (MANDATORY)**: Do NOT let a layout failure (clipping) mask a rendering failure (invisible text). If both exist, you MUST fail BOTH categories. "No visual defects detected" is FORBIDDEN if ANY defect in that category is observed in the visible pixels.
     - **ZERO TOLERANCE (LAYOUT)**: If any layout pre-analysis question (Q1-Q5) triggered a FAIL/SLICED/CHOPPED/FLAT WALL result, you are FORBIDDEN from marking the category as PASS.
 
