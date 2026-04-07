@@ -53,7 +53,7 @@ const WidgetAliases = {
 
 // CSS class signatures mapped to widget types
 const CSS_SIGNATURES = [
-    { classes: ['feedspace-cross-slider', 'cross-slider', 'fe-cross-slider'], type: 'CROSS_SLIDER' },
+    { classes: ['feedspace-cross-slider', 'cross-slider', 'fe-cross-slider', 'fe-cross', '[class*="cross-slider"]'], type: 'CROSS_SLIDER' },
     { classes: ['feedspace-company-logo-slider', 'company-logo-slider', 'fe-company-logo-slider'], type: 'COMPANY_LOGO_SLIDER' },
     { classes: ['feedspace-vertical-scroll', 'feedspace-updown', 'vertical-marquee'], type: 'MARQUEE_UPDOWN' },
     { classes: ['fe-feedspace-avatar-group-widget-wrap', 'feedspace-avatar-group'], type: 'AVATAR_GROUP' },

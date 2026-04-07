@@ -21,6 +21,7 @@ const StripSliderHelper = require('./interactiveWidgets/stripSliderHelper');   /
 const AvatarSliderHelper = require('./interactiveWidgets/avatarSliderHelper');  // handles SINGLE_SLIDER
 const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper');
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
+const MasonryHelper = require('./interactiveWidgets/masonryHelper');
 
 // All Feedspace widget selectors — ordered from most specific to least specific
 const FEEDSPACE_SELECTORS = [
@@ -217,18 +218,25 @@ class PlaywrightHelper {
                 const response = await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
                 if (response && response.status() >= 400) {
-                    throw new Error(`HTTP Error ${response.status()}: ${url}`);
+                    const status = response.status();
+                    let friendlyMsg = `The requested page is currently unavailable (${status} Error).`;
+                    if (status === 404) friendlyMsg = `The requested page could not be found (404 Error).`;
+                    if (status === 401 || status === 403) friendlyMsg = `Access denied or authorization required to view this page (${status} Error).`;
+                    if (status >= 500) friendlyMsg = `The server for this page is currently experiencing issues (${status} Error).`;
+                    throw new Error(friendlyMsg);
                 }
 
                 const isSoft404 = await this.page.evaluate(() => {
                     const text = document.body ? document.body.innerText : '';
                     return text.includes("Oops! That page can't be found.") ||
                         text.includes("Page Not Found") ||
-                        document.title.includes("Page not found");
+                        text.includes("404 Error") ||
+                        document.title.includes("Page not found") ||
+                        document.title.includes("404");
                 }).catch(() => false);
 
                 if (isSoft404) {
-                    throw new Error(`Page Soft-404 at ${url}`);
+                    throw new Error(`The page reached appears to be a "Not Found" landing page.`);
                 }
 
                 await this.page.waitForLoadState('load', { timeout: 30000 }).catch(() => {
@@ -451,24 +459,9 @@ class PlaywrightHelper {
                 }
             }
 
-            // ── STEP 3: Fallback — visible, then first ────────────────────────
+            // ── STEP 3: Verification ────────────────────────────────────────
             if (!locator) {
-                const candidateLocators = await allMatches.all();
-                for (const candidate of candidateLocators) {
-                    const discovered = await WidgetDetector.discover(candidate, this.networkWidgetMap);
-                    if (discovered !== 'Unknown' && await candidate.isVisible().catch(() => false)) {
-                        locator = candidate;
-                        detectedType = discovered;
-                        console.log(`[PlaywrightHelper] ⚠️ Fallback: Using visible widget (${discovered})`);
-                        break;
-                    }
-                }
-
-                if (!locator && count > 0) {
-                    locator = allMatches.first();
-                    detectedType = await WidgetDetector.discover(locator, this.networkWidgetMap);
-                    console.log(`[PlaywrightHelper] ⚠️ Fallback: Using first element (${detectedType})`);
-                }
+                console.warn(`[PlaywrightHelper] ⚠️  No locator found for expected type: ${this.expectedType}`);
             }
 
             // ── STEP 4: Type matching — network is source of truth ────────────
@@ -503,8 +496,8 @@ class PlaywrightHelper {
                 if (configHint !== 'Unknown') {
                     console.log(`[PlaywrightHelper] 💡 Config Hint Detection: Using ${configHint} based on unique property keys.`);
                     this.widgetType = configHint;
-                } else if (this.expectedType !== 'Unknown' && (detectedType === 'CAROUSEL_SLIDER' || detectedType === 'Unknown')) {
-                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, trust the config.
+                } else if (locator && this.expectedType !== 'Unknown' && (detectedType === 'CAROUSEL_SLIDER' || detectedType === 'Unknown')) {
+                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, trust the config ONLY if a locator was found.
                     console.log(`[PlaywrightHelper] 🛡️  Expected Override: Config explicitly requested ${this.expectedType}. Overriding detected ${detectedType}.`);
                     this.widgetType = this.expectedType;
                 } else if (detectedType !== 'Unknown') {
@@ -514,10 +507,13 @@ class PlaywrightHelper {
                 }
             }
 
-            // TRUTH OVERRIDE: Prevent common misidentifications (e.g. Cross Slider vs Carousel)
-            if (this.expectedType === 'CROSS_SLIDER' && this.widgetType === 'CAROUSEL_SLIDER') {
-                console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing CROSS_SLIDER identification over generic Carousel detection.`);
-                this.widgetType = 'CROSS_SLIDER';
+            // TRUTH OVERRIDE: Prevent common misidentifications (e.g. Cross Slider vs Carousel or Single Slider)
+            if (this.expectedType === 'CROSS_SLIDER') {
+                const genericSliders = ['CAROUSEL_SLIDER', 'SINGLE_SLIDER', 'AVATAR_SLIDER', 'AVATAR_CAROUSEL'];
+                if (genericSliders.includes(this.widgetType)) {
+                    console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing CROSS_SLIDER identification over common misdetected type: ${this.widgetType}.`);
+                    this.widgetType = 'CROSS_SLIDER';
+                }
             }
 
             const isMatched = isNetworkMatched ||
@@ -662,6 +658,10 @@ class PlaywrightHelper {
                 );
                 this.movementVerification = result;
                 if (screenshots?.length > 0) screenshotBuffers.push(...screenshots);
+
+            } else if (normalizedType === 'MASONRY' || normalizedType === 'GRID') {
+                const shots = await MasonryHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
             }
 
             // ── STEP 7: Ensure at least one focused shot ──────────────────────
@@ -688,7 +688,8 @@ class PlaywrightHelper {
             console.error('[PlaywrightHelper] Validation error:', error.message);
             if (screenshotBuffers.length === 0 && !this.page.isClosed()) {
                 try {
-                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
+                    const isMarquee = this.widgetType && (this.widgetType.includes('MARQUEE') || this.widgetType.includes('SLIDER'));
+                    screenshotBuffers.push(await this.page.screenshot({ fullPage: !isMarquee, animations: 'disabled' }));
                 } catch (ssError) {
                     console.error('[PlaywrightHelper] Fallback screenshot failed:', ssError.message);
                 }
@@ -747,7 +748,7 @@ class PlaywrightHelper {
         const hasNoVisuals = screenshotBuffers.length === 0 || !screenshotBuffers.some(b => b && b.length > 0);
 
         if (isDetectionFailure && hasNoVisuals) {
-            const reason = 'Automation could not locate the widget and no screenshots were captured.';
+            const reason = 'Feedspace widget not detected on this page.';
             console.error(`[PlaywrightHelper] 🛑 Aborting AI analysis: ${reason}`);
             return this._buildErrorResult(reason);
         }
@@ -757,7 +758,7 @@ class PlaywrightHelper {
         // it means the automation reached the element but failed to capture it.
         // This MUST be a failure.
         if (this.typeMatchResult?.matched && hasNoVisuals) {
-            const reason = `CRITICAL: Widget ${this.widgetType} confirmed via network, but visual capture failed. Check element visibility/dimensions.`;
+            const reason = `Feedspace widget (${this.widgetType}) detected via network, but failed to render visually on page.`;
             console.error(`[PlaywrightHelper] 🛑 ${reason}`);
             return this._buildErrorResult(reason);
         }
@@ -842,20 +843,19 @@ class PlaywrightHelper {
     _buildErrorResult(reason) {
         return {
             expectedType: this.expectedType,
-            widgetType: 'TECHNICAL_FAILURE',
+            widgetType: 'Validation Error',
             typeMatchResult: {
                 expected: this.expectedType,
                 detected: this.widgetType,
                 matched: false,
-                reason: `Automation Guardrail: ${reason}`,
-                // Add this to debug if the network actually saw the widget
+                reason: reason,
                 networkSawType: this._networkHasType(this.expectedType)
             },
             aiAnalysis: {
                 overall_status: 'FAIL',
-                summary: `Test aborted: ${reason}`,
+                summary: reason,
                 feature_results: [{
-                    feature: 'Automation Integrity',
+                    feature: 'Validation Integrity',
                     status: 'FAIL',
                     issue: reason
                 }]

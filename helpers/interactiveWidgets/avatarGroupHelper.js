@@ -8,14 +8,15 @@ class AvatarGroupHelper {
         try {
             await widgetLocator.scrollIntoViewIfNeeded({ timeout: 3000 });
             const box = await widgetLocator.boundingBox();
-            
+
             if (box) {
-                // Focused initial capture
+                // Focused initial capture (Generous 100px context)
+                const padding = 100;
                 const clip = {
-                    x: Math.max(0, box.x - 50),
-                    y: Math.max(0, box.y - 100),
-                    width: box.width + 100,
-                    height: box.height + 200
+                    x: Math.max(0, box.x - padding),
+                    y: Math.max(0, box.y - padding),
+                    width: Math.min(box.width + (padding * 2), page.viewportSize().width - Math.max(0, box.x - padding)),
+                    height: Math.min(box.height + (padding * 2), page.viewportSize().height - Math.max(0, box.y - padding))
                 };
                 screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
                 console.log('[AvatarGroupHelper] Initial avatar row captured.');
@@ -28,7 +29,7 @@ class AvatarGroupHelper {
 
                     const scan = (node) => {
                         if (!node) return;
-                        
+
                         // Find Avatars
                         const avatarSelectors = ['.feedspace-avatar', '.feedspace-avatar-image', '[class*="avatar"]'];
                         avatarSelectors.forEach(s => {
@@ -84,7 +85,7 @@ class AvatarGroupHelper {
                     foundText.forEach(el => {
                         const isTruncated = el.scrollWidth > el.clientWidth + 5;
                         const isDuplicated = el.textContent.toLowerCase().split('trusted by').length > 2;
-                        
+
                         if (isTruncated) {
                             warnings.push(`TEXT TRUNCATION: "${el.textContent.substring(0, 20)}..." is mathematically cut off (scrollWidth > clientWidth).`);
                         }
@@ -132,10 +133,10 @@ class AvatarGroupHelper {
         const avatars = await page.evaluate(async (selectors) => {
             const results = [];
             const visited = new Set();
- 
+
             const findInRoot = (node) => {
                 if (!node) return;
-                
+
                 selectors.forEach(s => {
                     try {
                         const matches = node.querySelectorAll(s);
@@ -153,37 +154,64 @@ class AvatarGroupHelper {
                                 }
                             }
                         });
-                    } catch(e){}
+                    } catch (e) { }
                 });
- 
+
                 Array.from(node.children || []).forEach(child => {
                     findInRoot(child);
                     if (child.shadowRoot) findInRoot(child.shadowRoot);
                 });
             };
- 
+
             findInRoot(document.body);
             return results;
         }, avatarSelectors);
 
         console.log(`[AvatarGroupHelper] Discovered ${avatars.length} avatars via Global Shadow DFS.`);
 
-        // 3️⃣ Sequential Interaction (Up to 5)
-        const targets = avatars.slice(0, 5); 
+        // 3️⃣ Sequential Interaction (Up to 50 unique reviews)
+        const targets = avatars.slice(0, 50);
+        const capturedFingerprints = new Set();
+        const visitedPositions = new Set();
+
+        let consecutiveFails = 0;
+        let lastY = -1;
 
         for (let i = 0; i < targets.length; i++) {
             const target = targets[i];
+            const currentY = Math.round(target.rect.y);
+
+            // 🛑 Early Exit 1: Massive Vertical Jump (Target is likely in footer or outside widget)
+            if (lastY !== -1 && Math.abs(currentY - lastY) > 1000) {
+                console.log(`[AvatarGroupHelper] 🛑 Stop: Detected potential layout jump (Y: ${lastY} -> ${currentY}). Ending interaction.`);
+                break;
+            }
+            lastY = currentY;
+
+            // 🛑 Early Exit 2: Aggressive 3-Strike Rule (Combined Duplicates/Duds)
+            if (consecutiveFails >= 3 && capturedFingerprints.size > 0) {
+                console.log(`[AvatarGroupHelper] 🛑 Stop: 3 consecutive unproductive interactions after finding unique content. Done.`);
+                break;
+            }
+
+            const posKey = `${Math.round(target.rect.x)},${currentY}`;
+            if (visitedPositions.has(posKey)) {
+                console.log(`[AvatarGroupHelper] Case ${i + 1}: Skipping redundant coordinate ${posKey}`);
+                continue;
+            }
+            visitedPositions.add(posKey);
+
             const selector = `[data-fs-temp-id="${target.id}"]`;
 
             try {
-                console.log(`[AvatarGroupHelper] Case ${i+1}: Clicking avatar at (${Math.round(target.rect.x)}, ${Math.round(target.rect.y)})...`);
-                
+                console.log(`[AvatarGroupHelper] Case ${i + 1}: Clicking avatar at (${Math.round(target.rect.x)}, ${currentY})...`);
+
                 await page.evaluate(({ sel, rect }) => {
-                    const el = document.querySelector(sel) || 
-                               Array.from(document.querySelectorAll('*'))
-                                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
-                                    ?.shadowRoot.querySelector(sel);
-                    
+                    const el = document.querySelector(sel) ||
+                        Array.from(document.querySelectorAll('*'))
+                            .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
+                            ?.shadowRoot.querySelector(sel);
+
                     if (el) {
                         el.click();
                     } else {
@@ -192,11 +220,7 @@ class AvatarGroupHelper {
                     }
                 }, { sel: selector, rect: target.rect });
 
-                await page.waitForTimeout(1500); 
-
-                // Capture Viewport
-                console.log(`[AvatarGroupHelper] Case ${i+1}: Capturing Viewport (1536x700 environment)...`);
-                screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
+                await page.waitForTimeout(1500);
 
                 const popupSelectors = '.feedspace-avatar-review-popup, .fe-review-box, .fe-modal-content';
 
@@ -212,29 +236,66 @@ class AvatarGroupHelper {
                 }, popupSelectors);
 
                 if (truncationCheck && truncationCheck.isTruncated) {
-                    const msg = `TRUTH DATA: Popup ${i+1} is TRUNCATED (hitting viewport bottom). Distance: ${Math.round(truncationCheck.val)}px.`;
+                    const msg = `TRUTH DATA: Popup ${i + 1} is TRUNCATED (hitting viewport bottom). Distance: ${Math.round(truncationCheck.val)}px.`;
                     console.log(`[SYSTEM ALERT] ${msg}`);
                     if (geometricWarnings) geometricWarnings.push(msg);
                 }
 
-                // Focused Clip
-                const popupLocator = page.locator(popupSelectors).filter({visible: true}).first();
+                const popupLocator = page.locator(popupSelectors).filter({ visible: true }).first();
                 const popupBox = await popupLocator.boundingBox().catch(() => null);
+
                 if (popupBox) {
-                    const clip = {
-                        x: Math.max(0, popupBox.x - 20),
-                        y: Math.max(0, popupBox.y - 20),
-                        width: popupBox.width + 40,
-                        height: popupBox.height + 60
-                    };
-                    screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
+                    // 🛡️ Content Fingerprint Check
+                    const fingerprint = await popupLocator.evaluate((el, index) => {
+                        const nameEl = el.querySelector('.fe-reviewer-name, [class*="name"]');
+                        const textEl = el.querySelector('.fe-review-text, [class*="text"]');
+                        const name = nameEl ? nameEl.innerText.trim() : '';
+                        const text = textEl ? textEl.innerText.trim().substring(0, 50) : '';
+
+                        // If both name and text are empty, it's likely a skeleton loader.
+                        // Force a unique fingerprint so the interaction isn't skipped.
+                        if (!name && !text) {
+                            return `SKELETON_UNRENDERED_${index}_${Date.now()}`;
+                        }
+
+                        return `${name}|${text}`;
+                    }, i).catch(() => null);
+
+                    if (fingerprint && capturedFingerprints.has(fingerprint)) {
+                        console.log(`[AvatarGroupHelper] Skipping duplicate review content: ${fingerprint.split('|')[0]}`);
+                        consecutiveFails++;
+                    } else {
+                        consecutiveFails = 0; // Reset strikes on a fresh find
+                        if (fingerprint) capturedFingerprints.add(fingerprint);
+
+                        // 📸 Viewport Capture (Moved here to prevent redundant screenshots)
+                        console.log(`[AvatarGroupHelper] Case ${i + 1}: Unique review confirmed. Capturing Viewport...`);
+                        screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
+
+                        const vSize = page.viewportSize();
+                        const padding = 150;
+                        const clipX = Math.max(0, popupBox.x - padding);
+                        const clipY = Math.max(0, popupBox.y - padding);
+                        const clip = {
+                            x: clipX,
+                            y: clipY,
+                            width: Math.min(popupBox.width + (padding * 2), vSize.width - clipX),
+                            height: Math.min(popupBox.height + (padding * 2), vSize.height - clipY)
+                        };
+                        screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
+                        console.log(`[AvatarGroupHelper] Unique review captured: ${fingerprint ? fingerprint.split('|')[0] : 'Unknown'}`);
+                    }
+                } else {
+                    console.log(`[AvatarGroupHelper] Case ${i + 1}: No popup detected after click.`);
+                    consecutiveFails++;
                 }
 
-                await page.mouse.click(10, 10); 
+                // Close popup to avoid overlap
+                await page.mouse.click(10, 10);
                 await page.waitForTimeout(500);
 
             } catch (err) {
-                console.warn(`[AvatarGroupHelper] Sequential Error ${i+1}: ${err.message}`);
+                console.warn(`[AvatarGroupHelper] Sequential Error ${i + 1}: ${err.message}`);
             }
         }
 

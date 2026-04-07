@@ -60,7 +60,10 @@ async function run() {
         // --- CLI ARGUMENT PARSING ---
         const args = process.argv.slice(2);
         const urlArg = args.find(a => a.startsWith('--url='))?.split('=')[1] || (args[args.indexOf('--url') + 1]);
-        const typeArg = args.find(a => a.startsWith('--type='))?.split('=')[1] || (args[args.indexOf('--type') + 1]);
+        const typeArg = args.find(a => a.startsWith('--type='))?.split('=')[1] || 
+                        args.find(a => a.startsWith('--widget='))?.split('=')[1] ||
+                        (args[args.indexOf('--type') + 1]) ||
+                        (args[args.indexOf('--widget') + 1]);
         const widthArg = args.find(a => a.startsWith('--width='))?.split('=')[1] || (args[args.indexOf('--width') + 1]);
         const heightArg = args.find(a => a.startsWith('--height='))?.split('=')[1] || (args[args.indexOf('--height') + 1]);
 
@@ -131,7 +134,7 @@ async function run() {
             // Create a fresh context for each attempt to avoid state contamination or session crashes
             const context = await browser.newContext({
                 viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 700 },
-                deviceScaleFactor: 1,
+                deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 locale: 'en-US',
                 timezoneId: 'Asia/Dubai', // Matches user GMT+4 context

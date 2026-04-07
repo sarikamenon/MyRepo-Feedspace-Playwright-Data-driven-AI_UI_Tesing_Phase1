@@ -55,23 +55,47 @@ class CarouselSliderHelper {
 
             await page.waitForTimeout(3000); // 3s gap
 
-            // 2. Second Screenshot: Focused on Widget
-            console.log('[CarouselSliderHelper] Capture 2/3: Focused on Widget');
-            const focusShot1 = await widgetLocator.screenshot({
-                animations: 'disabled',
-                scale: 'css'
-            }).catch(() => null);
-            if (focusShot1) screenshots.push(focusShot1);
+            // 2. Second Screenshot: Focused on Widget (Generous 100px Context)
+            console.log('[CarouselSliderHelper] Capture 2/3: Focused on Widget (100px Context)');
+            const box = await widgetLocator.boundingBox().catch(() => null);
+            if (box) {
+                const vSize = page.viewportSize();
+                const padding = 100;
+                const clipX = Math.max(0, box.x - padding);
+                const clipY = Math.max(0, box.y - padding);
+                const focusShot1 = await page.screenshot({
+                    clip: {
+                        x: clipX,
+                        y: clipY,
+                        width: Math.min(box.width + (padding * 2), vSize.width - clipX),
+                        height: Math.min(box.height + (padding * 2), vSize.height - clipY)
+                    },
+                    animations: 'disabled'
+                }).catch(() => null);
+                if (focusShot1) screenshots.push(focusShot1);
+            }
 
             await page.waitForTimeout(3000); // 3s gap
 
-            // 3. Third Screenshot: Focused on Widget
-            console.log('[CarouselSliderHelper] Capture 3/3: Focused on Widget');
-            const focusShot2 = await widgetLocator.screenshot({
-                animations: 'disabled',
-                scale: 'css'
-            }).catch(() => null);
-            if (focusShot2) screenshots.push(focusShot2);
+            // 3. Third Screenshot: Focused on Widget (Generous 100px Context)
+            console.log('[CarouselSliderHelper] Capture 3/3: Focused on Widget (100px Context)');
+            const box2 = await widgetLocator.boundingBox().catch(() => null);
+            if (box2) {
+                const vSize = page.viewportSize();
+                const padding = 100;
+                const clipX = Math.max(0, box2.x - padding);
+                const clipY = Math.max(0, box2.y - padding);
+                const focusShot2 = await page.screenshot({
+                    clip: {
+                        x: clipX,
+                        y: clipY,
+                        width: Math.min(box2.width + (padding * 2), vSize.width - clipX),
+                        height: Math.min(box2.height + (padding * 2), vSize.height - clipY)
+                    },
+                    animations: 'disabled'
+                }).catch(() => null);
+                if (focusShot2) screenshots.push(focusShot2);
+            }
 
             console.log(`[CarouselSliderHelper] Interaction complete. ${screenshots.length} screenshots captured.`);
 

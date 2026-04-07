@@ -86,9 +86,27 @@ class AvatarSliderHelper {
 
                     // Use the widgetLocator if available to capture the full context (arrows, avatars, text)
                     const shotTarget = widgetLocator || (await contentArea.isVisible() ? contentArea : page);
-                    const buffer = await shotTarget.screenshot({
-                        animations: 'disabled'
-                    }).catch(() => null);
+                    const tBox = await shotTarget.boundingBox();
+                    let buffer = null;
+
+                    if (tBox) {
+                        const vSize = page.viewportSize();
+                        const padding = 100; // Generous 100px context
+                        const clipX = Math.max(0, tBox.x - padding);
+                        const clipY = Math.max(0, tBox.y - padding);
+                        
+                        buffer = await page.screenshot({
+                            clip: {
+                                x: clipX,
+                                y: clipY,
+                                width: Math.min(tBox.width + (padding * 2), vSize.width - clipX),
+                                height: Math.min(tBox.height + (padding * 2), vSize.height - clipY)
+                            },
+                            animations: 'disabled'
+                        }).catch(() => null);
+                    } else {
+                        buffer = await (widgetLocator || page).screenshot({ animations: 'disabled' }).catch(() => null);
+                    }
 
                     if (buffer) {
                         // Check for duplicate screenshots (if content didn't actually change)

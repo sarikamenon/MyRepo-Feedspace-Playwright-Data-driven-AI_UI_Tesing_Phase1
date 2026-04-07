@@ -11,6 +11,14 @@ require('dotenv').config();
 const PROCESSED_URLS_FILE = path.join(process.cwd(), 'testData', 'processed_urls.json');
 
 /**
+ * Normalizes a URL for consistent comparison.
+ */
+function normalizeUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    return url.trim().toLowerCase().replace(/\/$/, '');
+}
+
+/**
  * Loads processed URLs from file.
  */
 function loadProcessedUrls() {
@@ -91,8 +99,20 @@ async function run() {
 
     let allApiData;
     try {
-        allApiData = await fetchConfig();
-        console.log(`[Main] API returned ${allApiData.length} total records.`);
+        const rawBatch = await fetchConfig();
+        
+        // Deduplicate by URL + WidgetType + WidgetID
+        const seenPairs = new Set();
+        allApiData = rawBatch.filter(entry => {
+            const rawUrl = entry.customer_url || entry.url;
+            const type = (entry.widget_type || entry.type || '').toLowerCase();
+            const id = entry.unique_widget_id || entry.id || '';
+            const key = `${normalizeUrl(rawUrl)}|${type}|${id}`;
+            if (seenPairs.has(key)) return false;
+            seenPairs.add(key);
+            return true;
+        });
+        console.log(`[Main] Deduplicated ${rawBatch.length} records down to ${allApiData.length} unique tests.`);
     } catch (e) {
         console.error(`[Main] API Error: ${e.message}`);
         process.exit(1);
@@ -115,7 +135,14 @@ async function run() {
 
     const browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--use-fake-ui-for-media-stream',
+            '--use-fake-device-for-media-stream'
+        ],
+        ignoreDefaultArgs: ['--enable-automation']
     });
 
     const reportHelper = new ReportHelper();
@@ -140,9 +167,19 @@ async function run() {
 
         while (attempt < maxAttempts && !success) {
             attempt++;
-            const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+            const context = await browser.newContext({ 
+                viewport: { width: 1920, height: 1080 },
+                deviceScaleFactor: 2,
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                locale: 'en-US',
+                timezoneId: 'Asia/Dubai',
+                extraHTTPHeaders: {
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            });
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
+            helper.expectedType = typeName;
 
             try {
                 if (attempt > 1) console.log(`   > Attempt ${attempt}/${maxAttempts}...`);

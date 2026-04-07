@@ -19,21 +19,29 @@ class BasecampHelper {
 
         let runDetails = "";
         summary.runs.forEach(run => {
-            const statusEmoji = run.status === "PASS" ? "✅" : (run.status === "FAIL" ? "❌" : "⚠️");
+            const statusEmoji = run.status === "PASS" ? "" : (run.status === "FAIL" ? "" : "⚠️ ");
             runDetails += `\n---\n`;
             runDetails += `website_url: "${run.url}"\n`;
             runDetails += `Widget type: "${run.widgetType}"\n`;
-            runDetails += `Status: ${statusEmoji} ${run.status}\n`;
+            runDetails += `Status: ${statusEmoji}${run.status}\n`;
 
             if (run.aiAnalysis && run.aiAnalysis.feature_results) {
                 runDetails += `\nVerification Results:\n`;
                 run.aiAnalysis.feature_results.forEach(f => {
-                    const fEmoji = f.status === "PASS" ? "✅" : (f.status === "FAIL" ? "❌" : "⚠️");
+                    const fEmoji = f.status === "PASS" ? "" : (f.status === "FAIL" ? "" : "⚠️ ");
                     const uiStatus = f.ui_status || f.actual || 'N/A';
                     const configStatus = f.config_status || f.expected || 'N/A';
 
                     // Show comparison in result line
-                    runDetails += `- ${f.feature}: ${fEmoji} ${f.status} (UI: ${uiStatus}, Config: ${configStatus})\n`;
+                    const issueStr = f.issue ? ` | ${f.issue}` : '';
+                    runDetails += `- ${f.feature}: ${fEmoji}${f.status} (UI: ${uiStatus}, Config: ${configStatus})${issueStr}\n`;
+                });
+            }
+
+            if (run.aiAnalysis && run.aiAnalysis.aesthetic_results) {
+                runDetails += `\nUI Aesthetic Checks:\n`;
+                run.aiAnalysis.aesthetic_results.forEach(a => {
+                    runDetails += `- ${a.category}: ${a.issue} | ${a.severity || 'N/A'} | ${a.status}\n`;
                 });
             } else if (run.error) {
                 runDetails += `\nError: ${run.error}\n`;
@@ -44,8 +52,8 @@ class BasecampHelper {
 Feedspace AI Visual Validation Report
 
 Total widgets tested: ${stats.total}
-Passed: ✅ ${stats.passed}
-Failed: ❌ ${stats.failed}
+Passed: ${stats.passed}
+Failed: ${stats.failed}
 Errors: ⚠️ ${stats.errors}
 ${runDetails}
 

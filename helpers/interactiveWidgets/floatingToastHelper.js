@@ -1,191 +1,273 @@
 class FloatingToastHelper {
-    static async interact(page, widgetLocator, geometricWarnings) {
-        console.log('[FloatingToastHelper] Starting interactive floating toast validation (with truth injection)...');
-        const screenshotBuffers = [];
+    /**
+     * Helper to find an element even if it's inside a Shadow DOM.
+     * @param {import('playwright').Page} page 
+     * @param {string} selector 
+     * @returns {Promise<import('playwright').ElementHandle | null>}
+     */
+    static async findDeep(page, selector) {
+        return await page.evaluateHandle((sel) => {
+            function find(s) {
+                const el = document.querySelector(s);
+                if (el) return el;
+                const all = document.querySelectorAll('*');
+                for (const n of all) {
+                    if (n.shadowRoot) {
+                        const res = n.shadowRoot.querySelector(s);
+                        if (res) return res;
+                    }
+                }
+                return null;
+            }
+            return find(sel);
+        }, selector).then(h => h.asElement());
+    }
 
-        // Use the passed 'page' parameter directly.
+    static async interact(page, widgetLocator, geometricWarnings) {
+        console.log('[FloatingToastHelper] Starting hardened unique multi-card validation loop...');
+        const screenshotBuffers = [];
+        const capturedSignatures = new Set();
+        const maxUniqueCaptures = 6;
 
         const previewSelectors = [
-            '.fe-floating-preview',
-            '.fe-toast-card',
-            '.fe-floating-toast',
-            '[class*="floating-toast"]',
-            '[class*="toast-preview"]',
-            '.feedspace-toast',
-            '.feedspace-card',
-            '.fe-chat-bubble',
-            '.fe-bubble-launcher',
-            '[class*="chat-box"]'
+            '.fe-floating-preview', '.fe-toast-card', '.fe-floating-toast', '[class*="floating-toast"]',
+            '[class*="toast-preview"]', '.feedspace-toast', '.feedspace-card', '.fe-chat-bubble',
+            '.fe-bubble-launcher', '[class*="chat-box"]'
         ];
-
         const expandedSelectors = [
-            '.fe-review-box',
-            '.fe-review-box-inner',
-            '.fe-modal-content',
-            '[class*="review-box"]',
-            '.feedspace-expanded-review'
+            '.fe-review-box', '.fe-modal-content', '[class*="review-box"]', '.feedspace-expanded-review'
         ];
-
         const closeBtnSelectors = [
-            '.fe-review-box-close-icon',
-            '[class*="close-icon"]',
-            '[class*="close-btn"]',
-            'button:has-text("X")',
-            '.fe-modal-close'
+            '.fe-review-box-close-icon', '[class*="close-icon"]', '.fe-modal-close', 'button'
         ];
 
         try {
-            // Revert to single interaction
-            console.log('[FloatingToastHelper] Searching for preview card...');
+            // Initial settle for entrance animations
+            await page.waitForTimeout(3000);
+            let consecutiveDuplicates = 0;
 
-            // 1️⃣ Find first visible preview card
-            let previewCard = widgetLocator.locator(previewSelectors.join(', ')).filter({ visible: true }).first();
-
-            // Wait briefly for toast to appear
-            if (!(await previewCard.isVisible())) {
-                console.log('[FloatingToastHelper] Waiting for visible preview card (10s)...');
-                await previewCard.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
-            }
-
-            // Fallback to global search if widget scope fails
-            if (!(await previewCard.isVisible())) {
-                previewCard = page.locator(previewSelectors.join(', ')).filter({ visible: true }).first();
-                await previewCard.waitFor({ state: 'visible', timeout: 5000 }).catch(() => { });
-            }
-
-            if (!(await previewCard.isVisible())) {
-                console.warn('[FloatingToastHelper] No visible preview card found in widget scope or global scope.');
-                
-                // 🛡️ EMERGENCY FALLBACK: Scan for *any* element with high Z-index or floating characteristics
-                const floatingFallback = page.locator('.fe-floating-preview, .fe-toast-card, [class*="floating-card"]').filter({ visible: true }).first();
-                if (await floatingFallback.isVisible()) {
-                    console.log('[FloatingToastHelper] Emergency fallback found a floating element.');
-                    previewCard = floatingFallback;
-                } else {
-                    console.warn('[FloatingToastHelper] Final fallback: Taking viewport screenshot of current state.');
-                    await page.waitForTimeout(3000); // Wait for potential late builders
-                    screenshotBuffers.push(await page.screenshot({ fullPage: false }));
-                    return screenshotBuffers;
-                }
-            }
-
-            // 2️⃣ Capture Previews (Multiple Contexts)
-            console.log('[FloatingToastHelper] Capturing multiple perspectives of the preview card...');
-            await page.waitForTimeout(2000); // 🛡️ Wait for slide-up entrance animation
-            
-            // Context 1: Full Page Structure
-            screenshotBuffers.push(await page.screenshot({ fullPage: true, animations: 'disabled' }));
-            
-            // Context 2: Natural Viewport appearance (ensures position:fixed is visible)
-            screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
-            
-            // Context 3: Highly focused element crop (with 50px safety padding)
-            try {
-                const box = await previewCard.boundingBox();
-                if (box) {
-                    const clip = {
-                        x: Math.max(0, box.x - 50),
-                        y: Math.max(0, box.y - 50),
-                        width: box.width + 100,
-                        height: box.height + 100
-                    };
-                    screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
-                } else {
-                    screenshotBuffers.push(await previewCard.screenshot({ animations: 'disabled' }));
-                }
-            } catch (e) {
-                console.warn('[FloatingToastHelper] Could not take localized element screenshot of previewCard.');
-            }
-
-            // 3️⃣ Click to expand
-            console.log('[FloatingToastHelper] Clicking preview to expand...');
-            await previewCard.hover({ force: true }).catch(() => { });
-            await page.waitForTimeout(1000); // 🛡️ Delay after hover for stability
-
-            // Try multiple click methods
-            try {
-                // 🛡️ REWRITE: High-reliability interaction
-                const box = await previewCard.boundingBox();
-                if (box) {
-                    console.log(`[FloatingToastHelper] Found card at [${Math.round(box.x)}, ${Math.round(box.y)}]. Executing pixel-center click.`);
-                    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-                } else {
-                    await previewCard.click({ force: true, timeout: 5000 });
-                }
-            } catch (e) {
-                console.log('[FloatingToastHelper] Primary click failed, trying dispatchEvent...');
-                await previewCard.dispatchEvent('click').catch(() => { });
-            }
-
-            // 4️⃣ Capture after click
-            console.log('[FloatingToastHelper] Capturing viewport screenshot after click...');
-            screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
-
-            // 🕵️ Wait for any element that looks like a modal/popup box to appear
-            const popupDetected = await page.waitForFunction((sel) => {
-                const el = document.querySelector(sel) || 
-                           Array.from(document.querySelectorAll('*'))
-                                .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
-                                ?.shadowRoot.querySelector(sel);
-                if (!el) return false;
-                const rect = el.getBoundingClientRect();
-                return rect.width > 50 && rect.height > 50;
-            }, '.fe-review-box, .fe-modal-content, [class*="review-box"], [class*="modal-window"]', { timeout: 8000 }).catch(() => false);
-
-            if (!popupDetected) {
-                console.warn('[FloatingToastHelper] No expansion popup container detected after click.');
-            }
-
-            // Wait for expanded box
-            console.log('[FloatingToastHelper] Final settle before capture...');
-            await page.waitForTimeout(2000);
-
-            let expandedBox = page.locator(expandedSelectors.join(', ')).filter({ visible: true }).first();
-            if (await expandedBox.isVisible()) {
-                console.log('[FloatingToastHelper] Expansion visible! Capturing high-res contextual screenshot...');
-                
-                // 🛡️ Geometric Probe for "Flat Wall" Truncation
-                const truncationCheck = await page.evaluate(() => {
-                    const popup = document.querySelector('.fe-review-box, .fe-modal-content, [class*="review-box"], [class*="modal-window"]');
-                    if (popup) {
-                        const rect = popup.getBoundingClientRect();
-                        const distToBottom = window.innerHeight - rect.bottom;
-                        return { 
-                            distToBottom,
-                            isTruncated: distToBottom < 5 // Within 5px of bottom is suspicious
-                        };
+            for (let i = 0; i < 20 && screenshotBuffers.length < (maxUniqueCaptures * 2); i++) {
+                // 🧹 HARD RESET: Clear any stale popups from previous iterations
+                await page.evaluate(() => {
+                    function hideAll(node) {
+                        if (!node) return;
+                        node.querySelectorAll('.fe-review-box, [class*="review-box"], [class*="expanded"]').forEach(p => {
+                            p.style.setProperty('display', 'none', 'important');
+                            p.style.setProperty('visibility', 'hidden', 'important');
+                            p.style.setProperty('opacity', '0', 'important');
+                        });
+                        Array.from(node.children || []).forEach(c => {
+                            hideAll(c);
+                            if (c.shadowRoot) hideAll(c.shadowRoot);
+                        });
                     }
-                    return { isTruncated: false };
-                });
+                    hideAll(document);
+                }).catch(() => { });
+                await page.mouse.click(20, 20); // Bounce off any existing focus
+                await page.waitForTimeout(500);
 
-                if (truncationCheck.isTruncated) {
-                    const msg = `TRUTH DATA: Floating Toast popup is truncated (Flat Wall at bottom). Distance to bottom: ${truncationCheck.distToBottom}px.`;
-                    console.log(`[SYSTEM ALERT] ${msg}`);
-                    if (geometricWarnings) geometricWarnings.push(msg);
+                // 1️⃣ Find preview card (Scoped -> Global -> Shadow-DOM Deep)
+                let previewCard = widgetLocator.locator(previewSelectors.join(', ')).filter({ visible: true }).first();
+                if (!(await previewCard.isVisible())) {
+                    previewCard = page.locator(previewSelectors.join(', ')).filter({ visible: true }).first();
                 }
 
-                // 🛡️ Take viewport screenshot (NOT element screenshot) to show truncation against screen bottom
-                screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
+                // Shadow-DOM Fallback
+                if (!(await previewCard.isVisible())) {
+                    const shadowEl = await this.findDeep(page, previewSelectors.join(', '));
+                    if (shadowEl) previewCard = shadowEl;
+                }
 
-                // 5️⃣ Close the expansion
-                console.log('[FloatingToastHelper] Closing expansion popup...');
-                let closeBtn = page.locator(closeBtnSelectors.join(', ')).filter({ visible: true }).first();
-                if (await closeBtn.isVisible()) {
-                    await closeBtn.click({ force: true }).catch(() => { });
+                if (!(await previewCard.isVisible())) {
+                    console.log('[FloatingToastHelper] No preview card visible. Waiting for cycle...');
+                    await page.waitForTimeout(1500);
+                    continue;
+                }
+
+                // 🆔 Surgical Identity Tracking (Name + Alpha-Numeric Body)
+                const reviewerName = await previewCard.locator('.fe-reviewer-name, .fe-name, b, strong, [class*="name"]').first().innerText().catch(() => "");
+                const fullText = await previewCard.innerText().catch(() => "");
+                
+                // Nuclear Scrub: Strip relative times (e.g. "2 hours ago"), non-alpha noise, and whitespace
+                const scrub = (str) => str.replace(/\b\d+\s+(year|month|day|hour|min|sec)s?\s+ago\b/ig, '')
+                                         .replace(/[^a-zA-Z0-9]/g, '')
+                                         .toLowerCase()
+                                         .substring(0, 150);
+
+                const signature = scrub(reviewerName + fullText);
+                
+                if (!signature || signature.length < 5) {
+                    await page.waitForTimeout(1000);
+                    continue;
+                }
+
+                if (capturedSignatures.has(signature)) {
+                    consecutiveDuplicates++;
+                    console.log(`[FloatingToastHelper] Duplicate signature detected for "${reviewerName || 'Unknown'}". Attempt ${consecutiveDuplicates}/4.`);
+                    
+                    if (consecutiveDuplicates >= 4) {
+                        console.log('[FloatingToastHelper] Cycle complete (Stagnation Guard triggered). Ending validation.');
+                        break;
+                    }
+                    
+                    await page.waitForTimeout(3000); // Wait for the widget to slide out
+                    continue;
+                }
+
+                // Reset counter on success
+                consecutiveDuplicates = 0;
+                console.log(`[FloatingToastHelper] 🎯 Captured unique card: "${reviewerName || signature.substring(0, 20)}..."`);
+                capturedSignatures.add(signature);
+
+                // 📸 Capture Preview (Focused Crop)
+                try {
+                    const pBox = await previewCard.boundingBox();
+                    if (pBox) {
+                        const vSize = page.viewportSize();
+                        const padding = 60; // Generous context
+                        const clipX = Math.max(0, pBox.x - padding);
+                        const clipY = Math.max(0, pBox.y - padding);
+                        screenshotBuffers.push(await page.screenshot({ 
+                            clip: { 
+                                x: clipX, 
+                                y: clipY, 
+                                width: Math.min(pBox.width + (padding * 2), vSize.width - clipX), 
+                                height: Math.min(pBox.height + (padding * 2), vSize.height - clipY) 
+                            },
+                            animations: 'disabled' 
+                        }));
+                    }
+                } catch (e) { }
+
+                // 👆 Expand (Hover + Click)
+                await previewCard.hover({ force: true }).catch(() => { });
+                const box = await previewCard.boundingBox();
+                if (box) {
+                    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => previewCard.click({ force: true }));
                 } else {
-                    console.log('[FloatingToastHelper] Close button not found, clicking outside...');
-                    await page.mouse.click(20, 20);
+                    await previewCard.click({ force: true }).catch(() => { });
                 }
-                await page.waitForTimeout(2000);
-            } else {
-                console.warn('[FloatingToastHelper] Expansion popup did not appear.');
+                
+                // 🕵️ Wait for Modal (Shadow-DOM Aware)
+                await page.waitForTimeout(1500); 
+                let expandedBox = page.locator(expandedSelectors.join(', ')).filter({ visible: true }).first();
+                
+                if (!(await expandedBox.isVisible())) {
+                    const shadowMod = await this.findDeep(page, expandedSelectors.join(', '));
+                    if (shadowMod) expandedBox = shadowMod;
+                }
+
+                if (await expandedBox.isVisible()) {
+                    // 🛡️ Geometric Probe (Truth Injection)
+                    const truncationCheck = await page.evaluate((selList) => {
+                        function findDeep(s) {
+                            const el = document.querySelector(s);
+                            if (el) return el;
+                            const all = document.querySelectorAll('*');
+                            for (const n of all) {
+                                if (n.shadowRoot) {
+                                    const res = n.shadowRoot.querySelector(s);
+                                    if (res) return res;
+                                }
+                            }
+                            return null;
+                        }
+                        const popup = findDeep(selList.join(', '));
+                        if (popup) {
+                            const rect = popup.getBoundingClientRect();
+                            const distToBottom = window.innerHeight - rect.bottom;
+                            // Only report truncation if the card physically overflows the viewport bottom
+                            return { distToBottom, isTruncated: rect.bottom > window.innerHeight };
+                        }
+                        return { isTruncated: false };
+                    }, expandedSelectors);
+
+                    if (truncationCheck.isTruncated) {
+                        const msg = `TRUTH DATA: Floating Toast popup for "${signature.substring(0, 20)}..." is truncated (Flat Wall at bottom).`;
+                        console.log(`[SYSTEM ALERT] ${msg}`);
+                        if (geometricWarnings) geometricWarnings.push(msg);
+                    }
+
+                    // 📸 Precision Composite Capture (Hardened Viewport Clipping)
+                    const compositeRect = await page.evaluate(() => {
+                        let minX = 10000, minY = 10000, maxX = 0, maxY = 0;
+                        let found = false;
+
+                        function scan(node) {
+                            if (!node) return;
+                            const s = window.getComputedStyle(node);
+                            if (s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0.1) {
+                                const r = node.getBoundingClientRect();
+                                if (r.width > 5 && r.height > 5) {
+                                    minX = Math.min(minX, r.left);
+                                    minY = Math.min(minY, r.top);
+                                    maxX = Math.max(maxX, r.right);
+                                    maxY = Math.max(maxY, r.bottom);
+                                    found = true;
+                                }
+                            }
+                            Array.from(node.children || []).forEach(c => scan(c));
+                            if (node.shadowRoot) Array.from(node.shadowRoot.children || []).forEach(c => scan(c));
+                        }
+                        
+                        // Start scan from document body to find all detached/shadow elements
+                        scan(document.body);
+
+                        return found ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null;
+                    }).catch(() => null);
+
+                    if (compositeRect) {
+                        const vSize = page.viewportSize();
+                        const padding = 100;
+                        const clip = {
+                            x: Math.max(0, Math.floor(compositeRect.x - padding)),
+                            y: Math.max(0, Math.floor(compositeRect.y - padding)),
+                            width: Math.min(Math.ceil(compositeRect.width + (padding * 2)), vSize.width),
+                            height: Math.min(Math.ceil(compositeRect.height + (padding * 2)), vSize.height)
+                        };
+                        
+                        screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }).catch(() => null));
+                    } else {
+                        // Fallback: Viewport capture if bounding box fails
+                        screenshotBuffers.push(await page.screenshot({ animations: 'disabled' }).catch(() => null));
+                    }
+
+                    // ❌ Close (Smarter Click-Outside)
+                    let closed = false;
+                    const closeBtn = page.locator(closeBtnSelectors.join(', ')).filter({ visible: true }).first();
+                    
+                    if (await closeBtn.isVisible()) {
+                        await closeBtn.click({ force: true }).catch(() => { });
+                        closed = true;
+                    } 
+                    
+                    if (!closed) {
+                        // Click "Away" logic: Calculate a point guaranteed to be outside the compositeRect
+                        const vSize = page.viewportSize();
+                        let clickX = 20; 
+                        let clickY = 20;
+
+                        if (compositeRect) {
+                            // If popup is on the left, click the far right. If on right, click left.
+                            if (compositeRect.x < (vSize.width / 2)) {
+                                clickX = vSize.width - 50;
+                            } else {
+                                clickX = 50;
+                            }
+                        }
+                        
+                        console.log(`[FloatingToastHelper] Clicking outside at (${clickX}, ${clickY}) to close...`);
+                        await page.mouse.click(clickX, clickY); 
+                    }
+                    
+                    await page.waitForTimeout(2000); 
+                }
+
+                if (screenshotBuffers.length >= (maxUniqueCaptures * 2)) break;
             }
 
         } catch (error) {
-            console.error(`[FloatingToastHelper] Error: ${error.message}`);
-            if (screenshotBuffers.length === 0) {
-                try { screenshotBuffers.push(await page.screenshot({ fullPage: false })); } catch (e) { }
-            }
+            console.error(`[FloatingToastHelper] Loop Critical Error: ${error.message}`);
         }
 
         return screenshotBuffers;

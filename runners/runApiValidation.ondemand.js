@@ -102,9 +102,26 @@ async function run() {
         console.log(`[OnDemand] Using ${dataRoot.urls.length} URL(s) from dispatch payload.`);
         allApiData = dataRoot.urls;
     } else {
-        console.log('[OnDemand] Invalid payload structure. Exiting.');
         process.exit(0);
     }
+
+    // Deduplicate by URL + WidgetType + WidgetID to prevent redundant validation for identical embeds
+    const seenPairs = new Set();
+    const uniqueApiData = allApiData.filter(entry => {
+        const rawUrl = typeof entry === 'string' ? entry : (entry.customer_url || entry.url || '');
+        const normUrl = normalizeUrl(rawUrl);
+        const type = (entry.widget_type || entry.type || '').toLowerCase();
+        const id = entry.unique_widget_id || entry.id || '';
+        const key = `${normUrl}|${type}|${id}`;
+        if (seenPairs.has(key)) return false;
+        seenPairs.add(key);
+        return true;
+    });
+
+    if (uniqueApiData.length < allApiData.length) {
+        console.log(`[OnDemand] Deduplicated ${allApiData.length} entries down to ${uniqueApiData.length} unique tests.`);
+    }
+    allApiData = uniqueApiData;
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
     
@@ -132,7 +149,9 @@ async function run() {
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled'
+            '--disable-blink-features=AutomationControlled',
+            '--use-fake-ui-for-media-stream',
+            '--use-fake-device-for-media-stream'
         ],
         ignoreDefaultArgs: ['--enable-automation']
     });
@@ -161,13 +180,17 @@ async function run() {
             attempt++;
             const context = await browser.newContext({ 
                 viewport: { width: targetWidth, height: targetHeight },
-                deviceScaleFactor: 1,
+                deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 locale: 'en-US',
-                timezoneId: 'Asia/Dubai'
+                timezoneId: 'Asia/Dubai',
+                extraHTTPHeaders: {
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
             });
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
+            helper.expectedType = typeName;
 
             try {
                 if (attempt > 1) console.log(`   > Attempt ${attempt}/${maxAttempts}...`);

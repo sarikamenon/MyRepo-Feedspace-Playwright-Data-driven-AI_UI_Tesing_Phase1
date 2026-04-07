@@ -181,7 +181,15 @@ class ReportHelper {
                         </div>
                         <div class="run-body">
                             ${run.error ? `<div style="color:red; padding:10px; background:#fff0f0; border-radius:4px;">Error: ${run.error}</div>` : `
-                                <p>${run.aiAnalysis.message || 'No analysis message.'}</p>
+                                <details style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                                    <summary style="padding: 12px 20px; background: #fff5eb; color: #92400e; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                                        <span>🔍 AI Reasoning / Thinking (Chain of Thought)</span>
+                                        <span style="font-size: 12px; font-weight: normal; opacity: 0.8;">Click to expand</span>
+                                    </summary>
+                                    <div style="padding: 20px; background: #fffbeb; border-top: 1px solid #fbd38d;">
+                                        <pre style="margin: 0; white-space: pre-wrap; color: #454545; font-family: inherit; background: transparent; padding: 0;">${run.aiAnalysis.analysis_message || run.aiAnalysis.message || 'No additional reasoning provided.'}</pre>
+                                    </div>
+                                </details>
                                 
                                 ${run.aiAnalysis.feature_results && run.aiAnalysis.feature_results.length > 0 ? `
                                     <table>
@@ -228,11 +236,11 @@ class ReportHelper {
                                         </thead>
                                         <tbody>
                                             ${run.aiAnalysis.aesthetic_results.map(a => {
-                                                const isPass = a.status === 'PASS';
-                                                const rowClass = isPass ? 'pass-row' : 'fail-row';
-                                                const badgeClass = isPass ? 'pass' : (a.severity === 'High' ? 'error' : 'fail');
-                                                const sevBadge = isPass ? 'warn' : 'warn';
-                                                return `
+            const isPass = a.status === 'PASS';
+            const rowClass = isPass ? 'pass-row' : 'fail-row';
+            const badgeClass = isPass ? 'pass' : (a.severity === 'High' ? 'error' : 'fail');
+            const sevBadge = isPass ? 'warn' : 'warn';
+            return `
                                                 <tr class="${rowClass}">
                                                     <td>${a.category || 'Visual Check'}</td>
                                                     <td>${a.issue || 'N/A'}</td>
@@ -240,7 +248,7 @@ class ReportHelper {
                                                     <td><span class="badge ${badgeClass}">${a.status || 'FAIL'}</span></td>
                                                 </tr>
                                                 `;
-                                            }).join('')}
+        }).join('')}
                                         </tbody>
                                     </table>
                                 ` : `
