@@ -3,11 +3,11 @@
         "Show Review Date",
         "Read More",
         "Inline CTA",
-        "Feedspace Branding",
-        "Show Load More Button"
-    ],
-    "commented_features": [
+        "Show Load More Button",
         "Show Review Ratings",
         "Show Social Platform Icon"
+    ],
+    "commented_features": [
+        "Feedspace Branding"
     ]
 }

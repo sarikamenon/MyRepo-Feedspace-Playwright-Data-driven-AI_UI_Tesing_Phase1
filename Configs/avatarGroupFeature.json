@@ -1,13 +1,13 @@
 {
     "features": [
-        "Show Star Ratings",
-        "Show Review Date",
+        "Show Review Ratings",
+        "Show Social Platform Icon",
+        "Show Platform Icon",
         "Read More",
-        "Inline CTA",
-        "Feedspace Branding"
+        "Review Date",
+        "Inline CTA"
     ],
     "commented_features": [
-        "Show Review Ratings",
-        "Show Social Platform Icon"
+        "Feedspace Branding"
     ]
 }

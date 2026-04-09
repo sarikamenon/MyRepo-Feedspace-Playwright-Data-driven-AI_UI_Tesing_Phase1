@@ -69,6 +69,7 @@ class ReportHelper {
         switch (status) {
             case 'PASS': return 'pass';
             case 'FAIL': return 'fail';
+            case 'Not Applicable': return 'na';
             case 'WARNING': return 'warn';
             case 'ERROR': return 'error';
             default: return 'warn';
@@ -109,6 +110,7 @@ class ReportHelper {
                 .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
                 .pass { background: #e8f5e9; color: #2e7d32; }
                 .hidden-badge { background: #e0f2fe; color: #0369a1; }
+                .na { background: #f3f4f6; color: #4b5563; }
                 .fail { background: #ffebee; color: #c62828; }
                 .error { background: #fff3e0; color: #ef6c00; }
                 .warn { background: #f5f5f5; color: #616161; }
@@ -119,11 +121,13 @@ class ReportHelper {
                 
                 .pass-row { background-color: #f0fdf4 !important; }
                 .hidden-pass-row { background-color: #f0f9ff !important; }
+                .na-row { background-color: #f9fafb !important; }
                 .fail-row { background-color: #fef2f2 !important; }
                 .warn-row { background-color: #fffbeb !important; }
                 
                 .pass-row td { color: #166534; }
                 .hidden-pass-row td { color: #0369a1; }
+                .na-row td { color: #6b7280; }
                 .fail-row td { color: #991b1b; }
                 .warn-row td { color: #92400e; }
                 
@@ -201,9 +205,10 @@ class ReportHelper {
             const uiStatus = f.ui_status || f.actual || 'N/A';
             const configStatus = f.config_status || f.expected || 'N/A';
             const isPass = f.status === 'PASS';
+            const isNA = f.status === 'Not Applicable';
             const isHiddenPass = isPass && (uiStatus === 'Absent' || uiStatus === 'HIDDEN');
-            const rowClass = isHiddenPass ? 'hidden-pass-row' : (isPass ? 'pass-row' : (f.status === 'WARNING' ? 'warn-row' : 'fail-row'));
-            const badgeClass = isHiddenPass ? 'hidden-badge' : this.getBadgeClass(f.status);
+            const rowClass = isNA ? 'na-row' : (isHiddenPass ? 'hidden-pass-row' : (isPass ? 'pass-row' : (f.status === 'WARNING' ? 'warn-row' : 'fail-row')));
+            const badgeClass = isNA ? 'na' : (isHiddenPass ? 'hidden-badge' : this.getBadgeClass(f.status));
 
             return `
                                                 <tr class="${rowClass}">

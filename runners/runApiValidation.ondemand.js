@@ -124,7 +124,7 @@ async function run() {
     allApiData = uniqueApiData;
 
     console.log(`[OnDemand] ${allApiData.length} URL(s) to process.`);
-    
+
     // Dynamic Viewport Extraction (Default: 1920x700 as per runValidation.js)
     const targetWidth = dataRoot.width ? parseInt(dataRoot.width) : 1920;
     const targetHeight = dataRoot.height ? parseInt(dataRoot.height) : 700;
@@ -147,7 +147,7 @@ async function run() {
     const browser = await chromium.launch({
         headless: true,
         args: [
-            '--no-sandbox', 
+            '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
             '--use-fake-ui-for-media-stream',
@@ -178,7 +178,7 @@ async function run() {
 
         while (attempt < maxAttempts && !success) {
             attempt++;
-            const context = await browser.newContext({ 
+            const context = await browser.newContext({
                 viewport: { width: targetWidth, height: targetHeight },
                 deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

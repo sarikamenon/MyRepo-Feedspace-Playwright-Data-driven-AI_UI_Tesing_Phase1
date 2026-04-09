@@ -53,7 +53,7 @@ class AvatarSliderHelper {
             // 2️⃣ Interaction Loop
             const maxScreenshots = 4; // Capture initial + 3 interactions
             const maxAttempts = 8;
-            
+
             // Initial screenshot
             const initialShot = await (widgetLocator || page).screenshot({ animations: 'disabled' }).catch(() => null);
             if (initialShot) screenshotBuffers.push(initialShot);
@@ -73,13 +73,13 @@ class AvatarSliderHelper {
 
                     await target.scrollIntoViewIfNeeded().catch(() => { });
                     await target.click({ force: true, timeout: 5000 }).catch(() => { });
-                    
+
                     // Wait for content stabilization
                     await context.waitForTimeout(2000);
 
                     // Locate content area for high-res focus
                     const contentArea = root.locator('.feedspace-items-slider, .feedspace-single-review-widget, .feedspace-elements-wrapper').filter({ visible: true }).first();
-                    
+
                     if (await contentArea.isVisible()) {
                         await contentArea.scrollIntoViewIfNeeded().catch(() => { });
                     }
@@ -94,7 +94,7 @@ class AvatarSliderHelper {
                         const padding = 100; // Generous 100px context
                         const clipX = Math.max(0, tBox.x - padding);
                         const clipY = Math.max(0, tBox.y - padding);
-                        
+
                         buffer = await page.screenshot({
                             clip: {
                                 x: clipX,

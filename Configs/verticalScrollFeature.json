@@ -3,11 +3,10 @@
         "Show Review Date",
         "Read More",
         "Inline CTA",
-        "Feedspace Branding"
+        "Show Review Ratings",
+        "Show Social Platform Icon"
     ],
     "commented_features": [
-        "Show Review Ratings",
-        "Show Social Platform Icon",
-        "Cross Scroll Animation"
+        "Feedspace Branding"
     ]
 }

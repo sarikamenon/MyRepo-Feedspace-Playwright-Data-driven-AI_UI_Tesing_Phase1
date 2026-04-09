@@ -4,6 +4,7 @@ playwright-report/
 reports/
 test-results/
 screenshots/
+testdata/*.json
 
 # Logs & debug files
 *.log

@@ -2,7 +2,11 @@
     "features": [
         "Left & Right Shift Buttons",
         "Show Review Date",
-        "Inline CTA"
+        "Inline CTA",
+        "Show Review Ratings",
+        "Show Social Platform Icon"
     ],
-    "commented_features": []
+    "commented_features": [
+        "Feedspace Branding"
+    ]
 }

@@ -163,9 +163,9 @@ async function run() {
                 if (fs.existsSync(configPath)) {
                     const configContent = JSON.parse(fs.readFileSync(configPath, 'utf8'));
                     staticFeatures = configContent.features;
-                    console.log(`   > Features Loaded: ${configFileName}.json (${staticFeatures.length} markers)`);
+                    console.log(`[Main] 📂 Local Config Loaded: ${configFileName}.json (${staticFeatures.length} features)`);
                 } else {
-                    console.warn(`   > Warning: No feature config found for ${typeName}. Using default AI vision.`);
+                    console.warn(`[Main] ⚠️  Warning: No local feature config found at ${configPath}. AI will auto-detect features.`);
                 }
 
                 // 3. Initialize & Navigate (Handling Hiding, Scrolling, etc.)

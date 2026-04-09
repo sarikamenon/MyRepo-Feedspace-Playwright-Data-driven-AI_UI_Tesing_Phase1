@@ -69,7 +69,7 @@ class AIEngine {
                         };
                     }
 
-                    // Method 2: Fallback to outermost { ... } (if markdown is missing)
+                    // Method 2: Manual brace matching (fallback)
                     const firstBrace = str.indexOf('{');
                     const lastBrace = str.lastIndexOf('}');
                     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -268,7 +268,17 @@ class AIEngine {
             contentLine
         ) && !analysisMessage.includes("CONTENT_PASS_FORCE");
 
-        const contentProof = extractProof(contentLine);
+const contentProof = extractProof(contentLine);
+
+        // ── ICON: anchor strings + findAdmission fallback ──
+        const iconLine = findAdmission(["icon violation", "erroneous visibility", "visible despite config", "logo-fail"]);
+        const mentionsIconIssue = (
+            analysisMessage.includes("ICON VIOLATION") ||
+            analysisMessage.includes("VISIBLE DESPITE CONFIG") ||
+            iconLine
+        );
+
+        const iconProof = extractProof(iconLine);
 
         // ── Apply AUTO-FAIL overrides where reasoning contradicts JSON PASS ──
         if (mentionsLayoutIssue || mentionsSharpnessIssue || mentionsContentIssue) {
@@ -291,10 +301,130 @@ class AIEngine {
                         res.status = "FAIL";
                         res.issue = `[Auto-Fail] Review text contains unrendered code or technical markers${contentProof}. Overriding for safety.`;
                         res.severity = "CRITICAL";
+                    } else if (res.category.toUpperCase().includes("ICON") && mentionsIconIssue) {
+                        res.status = "FAIL";
+                        res.issue = `[Auto-Fail] Social platform icon violation detected${iconProof}. Visible despite being OFF in config.`;
+                        res.severity = "CRITICAL";
                     }
                 }
             });
         }
+
+        // 1. CLEANUP FIRST: Strip any leaking placeholders from the raw AI response
+        const cleaningRegex = /XXXX|YYYY|REAL_ID_HERE|REAL_PLATFORM_HERE|ID:\s*N\/A|Platform:\s*N\/A|ID:\s*\[Data Not Linked\]/gi;
+        const aiResultsArray = aiData.feature_results || [];
+        const rawFeeds = config?.widget_data?.feeds_data || config?.feeds_data || config?.data?.feeds_data || [];
+        aiResultsArray.forEach(f => {
+            if (f.remarks) f.remarks = f.remarks.replace(cleaningRegex, "[Data Not Linked]");
+            if (f.issue) f.issue = f.issue.replace(cleaningRegex, "[Data Not Linked]");
+        });
+        
+        // --- GLOBAL CLEANUP & FINAL INJECTION: Strip ANY leaking placeholders from analysis_message ---
+        if (aiData.analysis_message) {
+            // Cleanup first
+            aiData.analysis_message = aiData.analysis_message.replace(cleaningRegex, "[Data Not Linked]");
+            
+            // Try to inject the first ID if still present (for pre-analysis logs)
+            if (aiData.analysis_message.includes("[Data Not Linked]") && rawFeeds.length > 0) {
+                const firstId = rawFeeds[0].id || "";
+                aiData.analysis_message = aiData.analysis_message.replace(/\[Data Not Linked\]/g, firstId.toString());
+            }
+        }
+
+        // 2. DEFCON-1 OVERRIDE: Data-Aware Injection
+        aiResultsArray.forEach(f => {
+            const trait = (f.feature || "").toLowerCase();
+            const isRatingOrIcon = trait.includes("rating") || trait.includes("icon") || trait.includes("platform") || trait.includes("date");
+            
+            // Perform injection for ALL relevant features, regardless of PASS/FAIL status
+            if (isRatingOrIcon) {
+                // Determine if this is a "Missing" issue vs a "Visible" issue
+                const aiIssue = (f.issue || "").toLowerCase() + (f.remarks || "").toLowerCase();
+                const isAbsentIssue = aiIssue.includes("absent") || aiIssue.includes("missing") || aiIssue.includes("not present") || aiIssue.includes("skeleton") || aiIssue.includes("not found");
+
+                // If it was a FAIL, we ONLY flip it to PASS if confirmed missing in data
+                // If it's a FAIL because it's VISIBLE but shouldn't be, we keep the FAIL!
+                if (f.status === "FAIL" && isAbsentIssue) {
+                    // This will be flipped inside the matchingFeed check below if hasNullData is true
+                }
+
+                // Map to the correct feed
+                // Regex improved to capture full names with spaces inside [Card: ...]
+                const cardIdentifier = (f.issue + (f.remarks || "")).match(/Card:\s*([^\]]+)/i)?.[1]?.trim() || "AN";
+                
+                let matchingFeed = rawFeeds.find(feed => {
+                    const name = (feed.app_user_name || feed.user_name || feed.name || "").toString().toLowerCase();
+                    const searchId = feed.id?.toString();
+                    const lowerIden = cardIdentifier.toLowerCase();
+                    
+                    return name.includes(lowerIden) || 
+                           lowerIden.includes(name) || 
+                           searchId === lowerIden || 
+                           lowerIden === "an";
+                });
+                
+                // Fallback: If only one card exists, use the first feed
+                if (!matchingFeed && rawFeeds.length === 1) matchingFeed = rawFeeds[0];
+
+                if (matchingFeed) {
+                    const isRatingTrait = trait.includes("rating");
+                    const isIconTrait = trait.includes("icon") || trait.includes("platform");
+                    const isDateTrait = trait.includes("date");
+                    
+                    let hasNullData = false;
+                    
+                    if (isRatingTrait) {
+                        hasNullData = matchingFeed.rating === null || 
+                                     matchingFeed.rating === 0 || 
+                                     matchingFeed.rating === "0";
+                    } else if (isIconTrait) {
+                        // FORCE DEFAULT: If show_platform_icon is missing from config, we assume it's OFF ('0')
+                        const showIconConfig = config?.widget_customization?.show_platform_icon ?? "0";
+                        const slug = matchingFeed.social_platform?.slug || "";
+                        const feedType = matchingFeed.feed_type || "";
+                        const isManualReview = slug.includes("manual");
+                        const isVideoFeed = feedType === "video_feed";
+                        
+                        hasNullData = (showIconConfig === "0") || 
+                                     isManualReview || 
+                                     isVideoFeed || 
+                                     (!matchingFeed.social_platform && !matchingFeed.review_url);
+                    } else if (isDateTrait) {
+                        hasNullData = !matchingFeed.review_at;
+                    }
+
+                    const realId = matchingFeed.id || "[Unknown ID]";
+                    const realPlatform = matchingFeed.social_platform?.name || matchingFeed.feed_type || "[Unknown Platform]";
+                    const proofString = `(Proof: SECTION 0 - ID:${realId}, Platform:${realPlatform})`;
+
+                    // --- VIOLATION OVERRULE (THE SUPREME LOCK) ---
+                    // If UI is Visible but Config is Absent, this is a product bug. 
+                    // We FORCE status to FAIL and override any AI "Data-Driven Pass" logic.
+                    const isVisibleInUI = f.ui_status === "Visible" || f.ui_status === "Visible (Detected)" || f.ui_status?.includes("Visible");
+                    const isAbsentInConfig = f.config_status === "Absent" || f.config_status?.includes("Absent");
+
+                    if (isVisibleInUI && isAbsentInConfig) {
+                        console.log(`[AIEngine] 🚨 VISIBILITY VIOLATION FORCE-FAIL: ${trait} is Visible vs Config Absent.`);
+                        f.status = "FAIL";
+                        f.issue = `VIOLATION: ${trait} is VISIBLE in the UI review cards, but the widget configuration is set to ABSENT. This is a product regression. ${proofString}`;
+                    } else if (hasNullData) {
+                        // Regular auto-heal for items that are absent as intended
+                        if (f.status === "FAIL" && !isAbsentIssue) {
+                            console.log(`[AIEngine] 🛡️ Visibility Violation Detected for ${trait}. Preserving FAIL status.`);
+                            f.issue = `Icon VIOLATION: Platform icon is visible in UI despite configuration being OFF. ${proofString}`;
+                        } else {
+                            f.status = "PASS";
+                            if (f.issue && !f.issue.includes("SKELETON_PASS_FORCE")) {
+                                f.issue = "No visual defects detected (Data-Driven Pass)";
+                            }
+                        }
+                    } else {
+                        // Data says there IS a rating, so we respect the AI's FAIL
+                        console.log(`[AIEngine] DEFCON-1: Respecting FAIL for ${f.feature} (Data has non-null value)`);
+                    }
+                }
+            }
+        });
 
         // 3. Recalculate overall status
         const hasFeatureFailures = (aiData.feature_results || []).some(f => f.status === "FAIL");

@@ -16,22 +16,19 @@ class CompanyLogoSliderHelper {
         // Step 1: Baseline screenshot (Normal state)
         console.log("[LogoSliderHelper] Capturing baseline...");
         screenshotBuffers.push(
-            await locator.screenshot({ animations: 'disabled' })
+            await page.screenshot({ fullPage: false, animations: 'disabled' })
         );
 
         try {
-            console.log("[LogoSliderHelper] Starting interaction flow (Shadow-Aware & Overflow-Unlocked)...");
+            console.log("[LogoSliderHelper] Starting interaction flow (Edge-Logo Toggle Mode)...");
 
             // 1. Shadow root research and overflow unlocker
-            // The widget uses a Shadow DOM inside .feedspace-embed
             await page.evaluate(() => {
                 const host = document.querySelector('.feedspace-embed');
                 if (!host || !host.shadowRoot) return;
-
                 const shadow = host.shadowRoot;
                 const wrap = shadow.querySelector('.feedspace-company-logo-marquee-wrap');
                 const track = shadow.querySelector('.feedspace-company-logo-marquee-track');
-
                 if (wrap) wrap.style.setProperty('overflow', 'visible', 'important');
                 if (track) {
                     track.style.setProperty('overflow', 'visible', 'important');
@@ -40,61 +37,37 @@ class CompanyLogoSliderHelper {
                 }
             });
 
-            // 2. Locate logos via shadow-piercing locators (Playwright handles this with >> or standard selectors)
+            // 2. Identify all logos
             const itemSel = '.feedspace-company-logo-slider-item:not([data-fs-logo-clone="true"])';
             await page.waitForSelector(itemSel, { timeout: 10000 });
-
             const uniqueLogos = page.locator(itemSel);
             const count = await uniqueLogos.count();
             console.log(`[LogoSliderHelper] Found ${count} unique logos.`);
-
             if (count === 0) throw new Error("No clickable logos found.");
 
-            // 3. Pick a centered logo (index 2 or last)
-            const targetIndex = Math.min(2, count - 1);
-            const targetItem = uniqueLogos.nth(targetIndex);
-            
-            console.log(`[LogoSliderHelper] Clicking logo index ${targetIndex} for expansion...`);
-            await targetItem.scrollIntoViewIfNeeded();
-            
-            // Interaction: Click the item container (bypassing the img specifically)
-            await targetItem.click({ force: true, timeout: 5000 });
+            // Target all unique logos (capped at 10 for performance, but satisfying 7+ requirement)
+            const targetIndices = Array.from({ length: Math.min(count, 10) }, (_, i) => i);
 
-            // 4. Wait for popup manifestation
-            const popupSel = '.feedspace-company-logo-review-popup';
-            console.log(`[LogoSliderHelper] Waiting for popup: ${popupSel}`);
-            
-            try {
-                await page.waitForFunction((sel) => {
-                    const host = document.querySelector('.feedspace-embed');
-                    if (!host || !host.shadowRoot) return false;
-                    const p = host.shadowRoot.querySelector(sel);
-                    if (!p) return false;
-                    const r = p.getBoundingClientRect();
-                    return r.height > 50 && window.getComputedStyle(p).display !== 'none';
-                }, popupSel, { timeout: 10000 });
-                console.log("[LogoSliderHelper] Popup detected and visible.");
-            } catch (e) {
-                console.warn("[LogoSliderHelper] Popup visibility check failed, attempting capture anyway.");
+            for (const index of targetIndices) {
+                console.log(`[LogoSliderHelper] Clicking logo index ${index} (Edge Detection)...`);
+                const targetItem = uniqueLogos.nth(index);
+                
+                // Interaction: Click to open/toggle
+                await targetItem.scrollIntoViewIfNeeded();
+                await targetItem.click({ force: true, timeout: 5000 });
+                
+                // Stabilization wait (User confirmed popup opens on click)
+                await page.waitForTimeout(1500);
+
+                // Capture state
+                console.log(`[LogoSliderHelper] Capturing state for logo index ${index}...`);
+                screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
             }
-
-            // 5. Final stabilization
-            await page.waitForTimeout(1000);
-
-            // 6. Freeze animations for capture
-            await page.addStyleTag({
-                content: `* { animation-play-state: paused !important; transition: none !important; }`
-            });
-
-            // 7. Capture expanded state (using page screenshot to ensure no container clipping)
-            console.log("[LogoSliderHelper] Capturing expanded state...");
-            screenshotBuffers.push(await locator.screenshot({ animations: 'disabled' }));
 
         } catch (e) {
             console.error('[LogoSliderHelper] Interaction Error:', e.message);
-            // Fallback
             if (!page.isClosed()) {
-                screenshotBuffers.push(await locator.screenshot({ animations: 'disabled' }));
+                screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
             }
         }
 

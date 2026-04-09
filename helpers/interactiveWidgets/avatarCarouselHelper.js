@@ -7,7 +7,7 @@ class AvatarCarouselHelper {
         // 1. Find the "True" Widget Root and Tag it for discovery
         const discoveryTempId = 'fs_root_' + Math.random().toString(36).substr(2, 9);
         await widgetLocator.evaluate((el, id) => el.setAttribute('data-fs-discovery-root', id), discoveryTempId);
-        
+
         const widgetRoot = await widgetLocator.evaluateHandle(el => {
             if (el.shadowRoot) return el.shadowRoot;
             if (el.querySelector('.feedspace-avatar-carousel, .feedspace-avatar-carousel-item')) return el;
@@ -18,7 +18,7 @@ class AvatarCarouselHelper {
         try {
             console.log('[AvatarCarouselHelper] Determining clip region for focused screenshot...');
             await widgetLocator.scrollIntoViewIfNeeded({ timeout: 3000 });
-            
+
             const box = await widgetLocator.boundingBox();
             if (box) {
                 const clip = {
@@ -50,11 +50,11 @@ class AvatarCarouselHelper {
         ];
 
         const avatars = await page.evaluate(async ({ tempId, selectors }) => {
-            const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`) || 
-                         Array.from(document.querySelectorAll('*'))
-                              .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`))
-                              ?.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`);
-            
+            const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`) ||
+                Array.from(document.querySelectorAll('*'))
+                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`))
+                    ?.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`);
+
             if (!root) return [];
 
             const results = [];
@@ -62,7 +62,7 @@ class AvatarCarouselHelper {
 
             const findInRoot = (node) => {
                 if (!node) return;
-                
+
                 selectors.forEach(s => {
                     try {
                         const matches = node.querySelectorAll(s);
@@ -80,7 +80,7 @@ class AvatarCarouselHelper {
                                 }
                             }
                         });
-                    } catch(e){}
+                    } catch (e) { }
                 });
 
                 Array.from(node.children || []).forEach(child => {
@@ -103,10 +103,10 @@ class AvatarCarouselHelper {
             let maxRight = -1;
             let target = null;
             ids.forEach(id => {
-                const el = document.querySelector(`[data-fs-temp-id="${id}"]`) || 
-                           Array.from(document.querySelectorAll('*'))
-                                .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`))
-                                ?.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`);
+                const el = document.querySelector(`[data-fs-temp-id="${id}"]`) ||
+                    Array.from(document.querySelectorAll('*'))
+                        .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`))
+                        ?.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`);
                 if (el) {
                     const rect = el.getBoundingClientRect();
                     // Ensure the element is visible on screen and further right than previous
@@ -141,7 +141,7 @@ class AvatarCarouselHelper {
             return true;
         });
 
-        const targets = uniqueAvatars.slice(0, 5); 
+        const targets = uniqueAvatars.slice(0, 5);
 
         console.log(`[AvatarCarouselHelper] Selected ${targets.length} unique avatars for interaction.`);
 
@@ -151,19 +151,19 @@ class AvatarCarouselHelper {
 
             try {
                 console.log(`[AvatarCarouselHelper] Clicking unique avatar ${i + 1}/${targets.length} (ID: ${target.id})...`);
-                
+
                 // 1. Hover first to trigger CSS flips
                 const loc = page.locator(selector).first();
                 await loc.scrollIntoViewIfNeeded();
-                await loc.hover({ force: true }).catch(() => {});
+                await loc.hover({ force: true }).catch(() => { });
                 await page.waitForTimeout(1000);
 
                 // 2. Click using robust PointerEvents
                 await page.evaluate((sel) => {
-                    const el = document.querySelector(sel) || 
-                               Array.from(document.querySelectorAll('*'))
-                                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
-                                    ?.shadowRoot.querySelector(sel);
+                    const el = document.querySelector(sel) ||
+                        Array.from(document.querySelectorAll('*'))
+                            .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
+                            ?.shadowRoot.querySelector(sel);
                     if (el) {
                         const eventOpts = { bubbles: true, cancelable: true, view: window };
                         el.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
@@ -174,18 +174,18 @@ class AvatarCarouselHelper {
                     }
                 }, selector);
 
-                await page.waitForTimeout(2500); 
+                await page.waitForTimeout(2500);
 
                 console.log(`[AvatarCarouselHelper] Capturing viewport screenshot for review card ${i + 1}...`);
-                
+
                 // Geometric Probe for "Flat Wall" Truncation
                 const truncationCheck = await page.evaluate(() => {
                     const popup = document.querySelector('.feedspace-modal, .fe-modal, [class*="modal"], [class*="popup"]');
                     if (popup) {
                         const rect = popup.getBoundingClientRect();
                         const distToBottom = window.innerHeight - rect.bottom;
-                        return { 
-                            hasPopup: true, 
+                        return {
+                            hasPopup: true,
                             distToBottom,
                             isTruncated: distToBottom < 5 // Within 5px of bottom is suspicious
                         };
@@ -202,7 +202,7 @@ class AvatarCarouselHelper {
                 const shot = await page.screenshot({ fullPage: false, animations: 'disabled' }).catch(() => null);
                 if (shot) screenshotBuffers.push(shot);
 
-                await page.mouse.click(50, 50); 
+                await page.mouse.click(50, 50);
                 await page.waitForTimeout(1000);
             } catch (err) {
                 console.warn(`[AvatarCarouselHelper] Failed to interact with avatar ${i + 1}: ${err.message}`);

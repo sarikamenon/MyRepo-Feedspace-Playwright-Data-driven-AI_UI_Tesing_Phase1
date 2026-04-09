@@ -87,15 +87,15 @@ class FloatingToastHelper {
                 // 🆔 Surgical Identity Tracking (Name + Alpha-Numeric Body)
                 const reviewerName = await previewCard.locator('.fe-reviewer-name, .fe-name, b, strong, [class*="name"]').first().innerText().catch(() => "");
                 const fullText = await previewCard.innerText().catch(() => "");
-                
+
                 // Nuclear Scrub: Strip relative times (e.g. "2 hours ago"), non-alpha noise, and whitespace
                 const scrub = (str) => str.replace(/\b\d+\s+(year|month|day|hour|min|sec)s?\s+ago\b/ig, '')
-                                         .replace(/[^a-zA-Z0-9]/g, '')
-                                         .toLowerCase()
-                                         .substring(0, 150);
+                    .replace(/[^a-zA-Z0-9]/g, '')
+                    .toLowerCase()
+                    .substring(0, 150);
 
                 const signature = scrub(reviewerName + fullText);
-                
+
                 if (!signature || signature.length < 5) {
                     await page.waitForTimeout(1000);
                     continue;
@@ -104,12 +104,12 @@ class FloatingToastHelper {
                 if (capturedSignatures.has(signature)) {
                     consecutiveDuplicates++;
                     console.log(`[FloatingToastHelper] Duplicate signature detected for "${reviewerName || 'Unknown'}". Attempt ${consecutiveDuplicates}/4.`);
-                    
+
                     if (consecutiveDuplicates >= 4) {
                         console.log('[FloatingToastHelper] Cycle complete (Stagnation Guard triggered). Ending validation.');
                         break;
                     }
-                    
+
                     await page.waitForTimeout(3000); // Wait for the widget to slide out
                     continue;
                 }
@@ -127,14 +127,14 @@ class FloatingToastHelper {
                         const padding = 60; // Generous context
                         const clipX = Math.max(0, pBox.x - padding);
                         const clipY = Math.max(0, pBox.y - padding);
-                        screenshotBuffers.push(await page.screenshot({ 
-                            clip: { 
-                                x: clipX, 
-                                y: clipY, 
-                                width: Math.min(pBox.width + (padding * 2), vSize.width - clipX), 
-                                height: Math.min(pBox.height + (padding * 2), vSize.height - clipY) 
+                        screenshotBuffers.push(await page.screenshot({
+                            clip: {
+                                x: clipX,
+                                y: clipY,
+                                width: Math.min(pBox.width + (padding * 2), vSize.width - clipX),
+                                height: Math.min(pBox.height + (padding * 2), vSize.height - clipY)
                             },
-                            animations: 'disabled' 
+                            animations: 'disabled'
                         }));
                     }
                 } catch (e) { }
@@ -147,11 +147,11 @@ class FloatingToastHelper {
                 } else {
                     await previewCard.click({ force: true }).catch(() => { });
                 }
-                
+
                 // 🕵️ Wait for Modal (Shadow-DOM Aware)
-                await page.waitForTimeout(1500); 
+                await page.waitForTimeout(1500);
                 let expandedBox = page.locator(expandedSelectors.join(', ')).filter({ visible: true }).first();
-                
+
                 if (!(await expandedBox.isVisible())) {
                     const shadowMod = await this.findDeep(page, expandedSelectors.join(', '));
                     if (shadowMod) expandedBox = shadowMod;
@@ -209,7 +209,7 @@ class FloatingToastHelper {
                             Array.from(node.children || []).forEach(c => scan(c));
                             if (node.shadowRoot) Array.from(node.shadowRoot.children || []).forEach(c => scan(c));
                         }
-                        
+
                         // Start scan from document body to find all detached/shadow elements
                         scan(document.body);
 
@@ -225,7 +225,7 @@ class FloatingToastHelper {
                             width: Math.min(Math.ceil(compositeRect.width + (padding * 2)), vSize.width),
                             height: Math.min(Math.ceil(compositeRect.height + (padding * 2)), vSize.height)
                         };
-                        
+
                         screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }).catch(() => null));
                     } else {
                         // Fallback: Viewport capture if bounding box fails
@@ -235,16 +235,16 @@ class FloatingToastHelper {
                     // ❌ Close (Smarter Click-Outside)
                     let closed = false;
                     const closeBtn = page.locator(closeBtnSelectors.join(', ')).filter({ visible: true }).first();
-                    
+
                     if (await closeBtn.isVisible()) {
                         await closeBtn.click({ force: true }).catch(() => { });
                         closed = true;
-                    } 
-                    
+                    }
+
                     if (!closed) {
                         // Click "Away" logic: Calculate a point guaranteed to be outside the compositeRect
                         const vSize = page.viewportSize();
-                        let clickX = 20; 
+                        let clickX = 20;
                         let clickY = 20;
 
                         if (compositeRect) {
@@ -255,12 +255,12 @@ class FloatingToastHelper {
                                 clickX = 50;
                             }
                         }
-                        
+
                         console.log(`[FloatingToastHelper] Clicking outside at (${clickX}, ${clickY}) to close...`);
-                        await page.mouse.click(clickX, clickY); 
+                        await page.mouse.click(clickX, clickY);
                     }
-                    
-                    await page.waitForTimeout(2000); 
+
+                    await page.waitForTimeout(2000);
                 }
 
                 if (screenshotBuffers.length >= (maxUniqueCaptures * 2)) break;

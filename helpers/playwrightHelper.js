@@ -230,9 +230,10 @@ class PlaywrightHelper {
                     const text = document.body ? document.body.innerText : '';
                     return text.includes("Oops! That page can't be found.") ||
                         text.includes("Page Not Found") ||
-                        text.includes("404 Error") ||
+                        (text.includes("404") && text.toLowerCase().includes("not found")) ||
                         document.title.includes("Page not found") ||
-                        document.title.includes("404");
+                        document.title.includes("404 Not Found") ||
+                        document.title.startsWith("404 -");
                 }).catch(() => false);
 
                 if (isSoft404) {
@@ -328,39 +329,6 @@ class PlaywrightHelper {
     async validateWithAI(staticFeatures) {
         this.staticFeatures = staticFeatures;
 
-        // --- UNIVERSAL ISOLATION LAYER ---
-        // Force-load widget-specific features if a type is identified.
-        // This ensures absolute feature isolation across all widget types.
-        try {
-            const WIDGET_CONFIG_MAP = {
-                'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
-                'CROSS_SLIDER': 'crossSliderFeature',
-                'AVATAR_CAROUSEL': 'avatarCarouselFeature',
-                'STRIP_SLIDER': 'stripSliderFeature',
-                'MARQUEE_STRIPE': 'stripSliderFeature',
-                'SINGLE_SLIDER': 'avatarSliderFeature',
-                'AVATAR_SLIDER': 'avatarSliderFeature',
-                'AVATAR_GROUP': 'avatarGroupFeature',
-                'CAROUSEL_SLIDER': 'carouselslider',
-                'MASONRY': 'masonryFeature',
-                'GRID': 'masonryFeature',
-                'MARQUEE_UPDOWN': 'verticalScrollFeature',
-                'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-                'FLOATING_TOAST': 'floatingCardsFeature'
-            };
-            const lookupType = this.widgetType || this.expectedType;
-            if (lookupType && lookupType !== 'Unknown' && lookupType !== '--url') {
-                const configName = WIDGET_CONFIG_MAP[lookupType] || lookupType.toLowerCase();
-                const configPath = path.join(process.cwd(), 'Configs', `${configName}.json`);
-                if (fs.existsSync(configPath)) {
-                    const content = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                    this.staticFeatures = content.features;
-                    console.log(`[PlaywrightHelper] 🛡️  Universal Isolation Layer: Force-loaded ${this.staticFeatures.length} features for ${lookupType}`);
-                }
-            }
-        } catch (e) {
-            console.warn(`[PlaywrightHelper] Universal isolation failed: ${e.message}`);
-        }
 
         console.log(`[PlaywrightHelper] Starting widget discovery — expecting: ${this.expectedType}`);
 
@@ -375,7 +343,7 @@ class PlaywrightHelper {
             // ── STEP 1: Wait for any widget marker ───────────────────────────
             await this.page.waitForSelector(SELECTOR_STRING, {
                 state: 'attached',
-                timeout: 30000
+                timeout: 45000
             }).catch(() => {
                 console.warn('[PlaywrightHelper] Timeout waiting for widget selector.');
             });
@@ -396,9 +364,8 @@ class PlaywrightHelper {
                 if (!this.page.isClosed()) {
                     screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
                 }
-                return this._finalizeAnalysis(screenshotBuffers, staticFeatures);
+                return this._finalizeAnalysis(screenshotBuffers, this.staticFeatures);
             }
-
             console.log(`[PlaywrightHelper] Found ${count} candidate(s)`);
 
             // ── STEP 2: Shadow DOM pierce scan ───────────────────────────────
@@ -410,6 +377,18 @@ class PlaywrightHelper {
                     root.querySelectorAll(selString).forEach(el => {
                         if (!visited.has(el)) {
                             visited.add(el);
+
+                            const hasStars = el.querySelector('.fs-rating-star, .fas.fa-star, .far.fa-star, [class*="star"], .fs-stars-wrapper, svg[class*="star"], [class*="rating-star"], [class*="star-icon"]');
+                            const hasNumericalRating = Array.from(el.querySelectorAll('div, span, b')).some(el => {
+                                const text = el.innerText.trim();
+                                return /^\d+(\.\d+)?$/.test(text) && parseFloat(text) > 0 && parseFloat(text) <= 10;
+                            });
+                            const isRatingFound = hasStars || hasNumericalRating;
+                            const statusDetail = hasStars ? "STARS" : (hasNumericalRating ? "NUMERICAL" : "NONE");
+                            
+                            if (isRatingFound) {
+                                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings Found (${statusDetail})`);
+                            }
 
                             // Ensure element has a way to be identified in the main loop
                             let id = el.id || el.getAttribute('unique_widget_id') ||
@@ -536,6 +515,43 @@ class PlaywrightHelper {
                 console.log(`[PlaywrightHelper] Network confirmed ${this.expectedType}; DOM returned ${detectedType} — using network as source of truth`);
             }
 
+            // --- UNIVERSAL ISOLATION LAYER ---
+            // Force-load widget-specific features now that the type is IDENTIFIED.
+            // This ensures absolute feature isolation across all widget types.
+            try {
+                const WIDGET_CONFIG_MAP = {
+                    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
+                    'CROSS_SLIDER': 'crossSliderFeature',
+                    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
+                    'STRIP_SLIDER': 'stripSliderFeature',
+                    'MARQUEE_STRIPE': 'stripSliderFeature',
+                    'SINGLE_SLIDER': 'avatarSliderFeature',
+                    'AVATAR_SLIDER': 'avatarSliderFeature',
+                    'AVATAR_GROUP': 'avatarGroupFeature',
+                    'CAROUSEL_SLIDER': 'carouselslider',
+                    'MASONRY': 'masonryFeature',
+                    'GRID': 'masonryFeature',
+                    'MARQUEE_UPDOWN': 'verticalScrollFeature',
+                    'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
+                    'FLOATING_TOAST': 'floatingCardsFeature'
+                };
+                const lookupType = this.widgetType || this.expectedType;
+                if (lookupType && lookupType !== 'Unknown' && lookupType !== '--url') {
+                    const configName = WIDGET_CONFIG_MAP[lookupType] || lookupType.toLowerCase();
+                    const configPath = path.join(process.cwd(), 'Configs', `${configName}.json`);
+                    console.log(`[PlaywrightHelper] 🛡️  Isolation Check: Looking for ${configPath} (Type: ${lookupType})`);
+                    if (fs.existsSync(configPath)) {
+                        const content = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                        this.staticFeatures = content.features;
+                        console.log(`[PlaywrightHelper] 🛡️  Universal Isolation Layer: Force-loaded ${this.staticFeatures.length} features for ${lookupType}`);
+                    } else {
+                        console.warn(`[PlaywrightHelper] 🛡️  Isolation Skip: No local config file found at ${configPath}`);
+                    }
+                }
+            } catch (e) {
+                console.warn(`[PlaywrightHelper] Universal isolation failed: ${e.message}`);
+            }
+
             // ── STEP 5: Viewport & distraction cleanup ───────────────────────
             if (this.page.isClosed()) return this._buildErrorResult('Page closed during setup');
 
@@ -584,6 +600,40 @@ class PlaywrightHelper {
             }
             await this._sleep(1000);
 
+            // ── STEP 5.5: Pagination Handling moved after context resolution to support iframes
+
+            // ── DOM "TRUTH" SNIFFING (SCOPED TO WIDGET) ─────────────────────
+            // This detects presence of elements buried in Shadow DOM to prevent AI hallucination and background interference.
+            const domTruth = await locator.evaluate(el => {
+                const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
+                const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars'];
+                
+                const findDeep = (root, selectors) => {
+                    for (const sel of selectors) {
+                        if (root.querySelector(sel)) return true;
+                    }
+                    const children = [...root.querySelectorAll('*')];
+                    for (const child of children) {
+                        if (child.shadowRoot && findDeep(child.shadowRoot, selectors)) return true;
+                    }
+                    return false;
+                };
+
+                const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
+                const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
+                
+                return { iconsFound, starsFound };
+            }).catch(() => ({ iconsFound: false, starsFound: false }));
+
+            if (domTruth.iconsFound) {
+                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
+                this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present in the top-right corner of the review cards. You MUST report them as 'Visible'.");
+            }
+            if (!domTruth.starsFound) {
+                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
+                this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
+            }
+
             // ── STEP 6: Widget-specific interaction ──────────────────────────
             const box = await locator.boundingBox().catch(() => null);
             console.log(`[PlaywrightHelper] Widget bounds: ${box ? `${Math.round(box.width)}x${Math.round(box.height)}` : 'Unknown'}`);
@@ -597,6 +647,10 @@ class PlaywrightHelper {
                     console.log('[PlaywrightHelper] Widget is inside iframe — switching context.');
                 }
             }
+
+            // ── STEP 6.5: Pagination Handling (Context Aware Storyboard) ─────
+            // This loop handles capturing the 4-shot storyboard progression (0, 1, 4, Final)
+            await this._handleLoadMoreLoop(interactionContext, screenshotBuffers);
 
             if (normalizedType === 'AVATAR_GROUP') {
                 const shots = await AvatarGroupHelper.interact(
@@ -696,7 +750,7 @@ class PlaywrightHelper {
             }
         }
 
-        return this._finalizeAnalysis(screenshotBuffers, staticFeatures);
+        return this._finalizeAnalysis(screenshotBuffers, this.staticFeatures);
     }
 
     /**
@@ -862,6 +916,68 @@ class PlaywrightHelper {
             },
             screenshotPaths: []
         };
+    }
+
+    async _handleLoadMoreLoop(context, screenshotBuffers = []) {
+        let clickCount = 0;
+        const maxClicks = 10;
+        const loadMoreSelector = 'span:has-text("Load More"), button:has-text("Load More")';
+
+        console.warn(`[PlaywrightHelper] 🔄 Initializing "Load More" storyboard loop (Max ${maxClicks} clicks)...`);
+
+        // --- View 1: Initial State (Click 0) ---
+        if (screenshotBuffers.length === 0) {
+            const initialShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
+            if (initialShot) {
+                console.log('[PlaywrightHelper] Storyboard: Captured View 1 (Initial State)');
+                screenshotBuffers.push(initialShot);
+            }
+        }
+
+        while (clickCount < maxClicks) {
+            try {
+                // Ensure the button is visible and re-centered
+                const button = context.locator(loadMoreSelector).filter({ visible: true }).first();
+                if (!(await button.isVisible())) {
+                    console.log('[PlaywrightHelper] "Load More" button no longer visible. Expansion complete.');
+                    break;
+                }
+
+                clickCount++;
+                console.warn(`[PlaywrightHelper] 🔄 Clicking "Load More" (${clickCount}/${maxClicks})...`);
+                
+                // Force scroll to button before clicking to maintain human visibility
+                await button.scrollIntoViewIfNeeded().catch(() => {});
+                await button.click({ force: true, timeout: 5000 }).catch(async () => {
+                    await button.evaluate(el => el.click());
+                });
+
+                // Wait for content to arrive and stabilize
+                await this._sleep(2000);
+
+                // --- View 2 & 3: Progression States (Click 1 and 4) ---
+                if (clickCount === 1 || clickCount === 4) {
+                    console.log(`[PlaywrightHelper] Storyboard: Capturing View ${clickCount === 1 ? '2' : '3'}...`);
+                    // Smart scroll: Ensure we see the NEWLY loaded area
+                    await context.evaluate(() => window.scrollBy(0, 400)).catch(() => {}); 
+                    const shot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
+                    if (shot) screenshotBuffers.push(shot);
+                }
+
+            } catch (err) {
+                console.warn(`[PlaywrightHelper] ⚠️ Pagination loop interrupted at click ${clickCount}:`, err.message);
+                break;
+            }
+        }
+
+        // --- View 4: Final State (After Loop) ---
+        if (clickCount > 0) {
+            console.log('[PlaywrightHelper] Storyboard: Captured View 4 (Final State)');
+            const finalShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
+            if (finalShot) screenshotBuffers.push(finalShot);
+        }
+
+        console.log(`[PlaywrightHelper] ✅ Storyboard sequence complete with ${screenshotBuffers.length} images.`);
     }
 
     _sleep(ms) {

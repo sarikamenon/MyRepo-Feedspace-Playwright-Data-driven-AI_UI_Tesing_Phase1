@@ -5,10 +5,10 @@
         "Show Review Date",
         "Read More",
         "Inline CTA",
-        "Feedspace Branding"
-    ],
-    "commented_features": [
         "Show Review Ratings",
         "Show Social Platform Icon"
+    ],
+    "commented_features": [
+        "Feedspace Branding"
     ]
 }

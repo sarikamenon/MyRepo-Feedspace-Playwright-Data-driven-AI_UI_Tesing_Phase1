@@ -26,7 +26,15 @@ class PromptBuilder {
       "Read More": true
     };
 
-    const featuresToTest = staticFeatures || config.features || Object.keys(featureMap);
+    const featuresToTest = (staticFeatures && staticFeatures.length > 0)
+      ? staticFeatures
+      : (config.features || Object.keys(featureMap).filter(featureName => {
+        const configKey = featureMap[featureName];
+        if (!configKey) return false;
+        const keys = Array.isArray(configKey) ? configKey : [configKey];
+        const lookupContexts = [config, config.widget_customization, config.data].filter(Boolean);
+        return keys.some(key => lookupContexts.some(ctx => key in ctx));
+      }));
 
     const instructions = featuresToTest
       .map(featureName => {
@@ -58,44 +66,152 @@ class PromptBuilder {
           expected = "N/A";
         }
 
+        // --- DATA-AWARE OVERRIDE (GRANULAR RATING LOGIC) ---
+        if (expected === "Visible") {
+          const rawFeeds = config.feeds_data || config.data?.feeds_data || [];
+          if (rawFeeds.length > 0) {
+            if (featureName === "Show Review Ratings") {
+              const allQualifyForAbsent = rawFeeds.every(f => {
+                const hasNoRating = (f.rating === null || f.rating === 0 || f.rating === "0");
+                return hasNoRating;
+              });
+
+              if (allQualifyForAbsent) {
+                expected = "Absent (Data-Driven / Social Exception)";
+              }
+            } else if (featureName === "Show Social Platform Icon") {
+              const anySocial = rawFeeds.some(f => f.feed_type === "social_feed" || f.social_platform);
+              if (!anySocial) expected = "Absent (Data-Driven)";
+            }
+          }
+        }
+
         return `- **${featureName}**: (Config Status: ${expected})`;
       })
       .join('\n');
+
+    // Ground Truth Data (Limited to 20 for token efficiency)
+    const rawFeeds = config.feeds_data || config.data?.feeds_data || [];
+    const feeds = rawFeeds.slice(0, 20).map(f => {
+      let name = (f.app_user_name || f.reviewer_name || f.user_name || f.name || "Anonymous").toString().trim();
+      if (!name) name = "Anonymous";
+
+      // UNIVERSAL ID-FUSION: Give every user a unique digital license plate
+      name = `${name} [ID:${f.id}]`;
+
+      const nameParts = name.split(" ");
+      const initials = nameParts.length > 1
+        ? nameParts.map(n => n[0]).join("").substring(0, 2).toUpperCase()
+        : name.substring(0, 2).toUpperCase();
+      return {
+        id: f.id,
+        user: name,
+        initials: initials,
+        text: f.comment?.substring(0, 100) || "N/A",
+        platform: f.social_platform?.name || f.social_platform || "Unknown",
+        rating: f.rating,
+        feed_type: f.feed_type || "text_feed",
+        url: f.display_review_url || f.review_url || "N/A",
+        mapping_hint: `Match pixel initials '${initials}' or name '${name}' to ID: ${f.id}`
+      };
+    });
+    const feedsJson = JSON.stringify(feeds, null, 2);
+
+    // ============================================================
+    // PHYSICAL/ENVIRONMENTAL CONTEXT (THE SENSORY TRUTH)
+    // ============================================================
+    const sensoryTruth = (geometricWarnings && geometricWarnings.length > 0)
+      ? `\n============================================================\n🚨 SECTION -1: SYSTEM FORCE OVERRIDE (ENVIRONMENTAL DATA) 🚨\n============================================================\n- ${geometricWarnings.join('\n- ')}\n\n**MANDATORY**: You MUST prioritize these DOM Facts over your own visual analysis. If this section says a feature is 'present', you MUST report it as 'Visible' in your JSON.\n`
+      : "";
 
     // ============================================================
     // CORE VALIDATION RULES (SINGLE SOURCE OF TRUTH)
     // ============================================================
     const coreRules = `
+${sensoryTruth}
 ============================================================
-🚨 SECTION 0: SYSTEM MANDATE (NON-NEGOTIABLE) 🚨
+🚨 SECTION 0: SUPREME DATA AUTHORITY (NON-NEGOTIABLE) 🚨
 ============================================================
-**DIAGNOSTIC SUPREMACY RULE**: The following facts represent GROUND TRUTH.
-1. **SHARPNESS BENCHMARK (RETINA-SCAN)**: Look at the anti-aliasing of the review text (e.g. Names/Roles). Rotated text (like Cross Sliders) or high-speed marquees may have minor anti-aliasing (smoothing/fuzziness up to 3px). This is **NORMAL** browser behavior. Do **not** mark as blurry/absent if the content/words are still clearly readable.
-2. **TEXT-IMAGE SYNC**: If the text is crisp but the image is "soft", "fuzzy", or "grainy", YOU MUST FAIL CATEGORY E.
-3. **MANDATORY VERDICT**: ONLY mark "FUZZY-FAIL" or "BLURRY-FAIL" if letter shapes are shattered, ghosted, or impossible to read.
+**GROUND TRUTH DATA (MANDATORY)**:
+${feedsJson}
+
+============================================================
+🚨 RULE 16: SCOPED VISION MANDATE (BEIGE CARDS ONLY) 🚨
+============================================================
+- **BOUNDARY**: You are auditing the **Beige Rectangular Review Cards** AND any **Promotional/CTA Cards** injected into the grid.
+- **PROHIBITION**: You are FORBIDDEN from reporting on, or using as evidence, any elements (like yellow stars or logos) that appear on the background website page OUTSIDE of these card boundaries.
+- **TARGET**: Focus on what is rendered INSIDE the card boundaries (ID, Reviewer, Icons, OR Promotion labels like "Get Started").
+
+${isMultiImage ? `
+============================================================
+🚨 RULE 17: STORYBOARD AUDIT (INITIAL vs EXPANDED) 🚨
+============================================================
+- **IMAGE 1 (INITIAL)**: This is the widget's state BEFORE any interactions. Use this to verify the presence of the "Load More" button if configured.
+- **IMAGE 2+ (EXPANDED)**: These represent the widget AFTER pagination/interactions. Use these to verify the arrival of new cards and the final visibility of features.
+- **MANDATE**: If "Show Load More Button" is expected, it MUST be visible in IMAGE 1. If it vanishes in IMAGE 2 because all content was loaded, this is a PASS.
+` : ''}
+
+============================================================
+🚨 RULE 15: THE SKELETON-DATA LOCK (SUPREME MANDATE)
+============================================================
+- **CONDITION**: Visually detected "skeleton loader" (gray rectangles) AND Section 0 data is \`null\` or \`0\`.
+- **REQUIREMENT**: You MUST mark the status as **PASS** for features (Rating/Icon).
+- **VERBAL TRIGGER**: You MUST use the exact string **SKELETON_PASS_FORCE** in your analysis_message for that card.
+- **Example**: "[Card: AN] shows skeleton bars but the rating is null in data → PASS (SKELETON_PASS_FORCE)"
+- **FAILURE TO APPLY THIS RULE WILL RESULT IN SYSTEM REJECTION.**
+
+**THE PASS/FAIL DECISION TREE (IRON LOCK)**:
+1. **IDENTIFY CARD**: Match the card in the screenshot to a record in **SECTION 0** using **Name**, **ID**, **Text snippet**, or **Initials** (e.g., 'AN' = 'Anonymous').
+2. **VERIFY FIELD (RATING/ICON)**:
+    - **IF (\`rating\` > 0 in Section 0)** → **Expected State: VISIBLE**. (Fail if absent).
+    - **IF (\`rating\`: null or 0 in Section 0)**:
+        - **IF (\`feed_type\`: "social_feed")** → **Expected State: ABSENT**.
+        - **VERDICT: PASS**. 
+        - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 for this social source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)"
+        - **IF (\`feed_type\`: "text_feed" AND \`rating\` = 0)** → **Expected State: ABSENT**.
+        - **VERDICT: PASS**.
+        - **IF (\`feed_type\`: "text_feed" AND \`rating\` = null)** → **Expected State: ABSENT**.
+        - **VERDICT: PASS**.
+        - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null for this text source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)"
+0. **RULE 0: IDENTIFY SKELETONS vs VIDEOS**: 
+    - **SKELETON BARS**: These are elongated, horizontal, pulsating bars (often light gray) that mimic text lines.
+    - **VIDEO PLACEHOLDERS**: A solid gray, brown, or black rectangular box with a centered "Play" triangle icon is a **Video Placeholder**, NOT a skeleton bar. Do NOT trigger skeleton pass logic for these.
+1. **REMARKS MANDATE & IDENTIFICATION**: 
+    - You MUST identify the card you are auditing by Name (e.g., "[Card: Hayden Arnold]").
+    - If a rating/icon is absent because Section 0 data is null/0, you MUST provide a remark following this pattern: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
+4. **SHARPNESS BENCHMARK**: Look at anti-aliasing. If text is sharp, diagonal text or icons may have minor smoothing. This is **PASS**.
+5. **STATUS LOCK (ABSOLUTE)**: If you use the remark "Review ratings are not present as the rating in the data is null or 0" or "Social platform icon is not present as the data is null", you MUST mark the status as **PASS**.
+6. **PROOF-ID MANDATE (CRITICAL)**: You are FORBIDDEN from outputting literal "XXXX", "YYYY", or "N/A" if a matching record exists in SECTION 0. You MUST find the actual \`id\` and \`platform\`.
+   - **Identity Mapping Log**: Your reasoning MUST begin with a map: "Pixel [AN] -> ID:33769".
+   - **System Failure**: Using placeholders will result in an immediate rejection.
+
+============================================================
+🚨 SYSTEM MANDATE (NON-NEGOTIABLE) 🚨
+============================================================
+1. **TEXT-IMAGE SYNC**: If the text is crisp but the image is "soft", "fuzzy", or "grainy", YOU MUST FAIL CATEGORY E.
+2. **MANDATORY VERDICT**: ONLY mark "FUZZY-FAIL" or "BLURRY-FAIL" if letter shapes are shattered, ghosted, or impossible to read.
 
 ============================================================
 🚨 MANDATORY RESPONSE MANDATE: ABSOLUTE AUDITOR
 ============================================================
 - You are a **PIXEL AUDITOR**, not a reviewer.
 - You MUST scan **EVERY screenshot** for **DIFFERENT reviewers**.
-- **MANDATORY AUDIT LOG**: You are PROHIBITED from providing a generic PASS/FAIL summary. Your \`analysis_message\` MUST include a line/table for **EVERY unique reviewer** found.
-- **FAILURE PROPAGATION**: If ANY single reviewer fails a rule (Sharpness, Truncation, JSON), the entire Category MUST be marked **FAIL**.
-- **NO DEBT**: You cannot ignore a blurred Mel B just because Jesse Cooke is sharp.
-- **IMAGE DEFINITION**: "Image/Graphic" includes **Photos, Logos, Icons, and INITIALS-BASED boxes**. All must be audited for sharpness.
+- **MANDATORY AUDIT LOG**: Your \`analysis_message\` MUST include a line/table for **EVERY unique reviewer** found.
+- **FAILURE PROPAGATION**: If ANY single reviewer fails a rule, the entire Category MUST be marked **FAIL**.
 
 ============================================================
-🚨 CORE VALIDATION RULES (IRON LOCK)
+🚨 CORE VALIDATION RULES (IRON LOCK) 🚨
 ============================================================
 
-**RULE 1: FORCED SHARPNESS & QUALITY (IRON LOCK)**
-- **STEP 1**: Identify the sharpest text visible.
-- **STEP 2**: Identify the avatar/icon/logo/diagonal-text edge.
-- **STEP 3**: Compare edge transition:
-    - Text edge: 1-2px boundary
-    - Image/Diagonal text: 1px → **PASS**, 2-3px soft gradient (anti-aliasing) → **PASS**, >4px motion blur/ghosting → **FAIL**.
-- **OUTPUT**: You MUST provide a **SHARPNESS LOG**:
-    - "[Name]: Text Xpx / Image Ypx → PASS/FAIL"
+**RULE 1: AVATAR PORTRAIT QUALITY (PORTRAIT-HARDENED)**
+- **THE GOLDEN REFERENCE**: Compare images to the user-provided reference. Right side = PASS, Left side = FAIL.
+- **THE EYELASH & ANTENNA TEST**: For avatars, look at the eyes and brows. Individual eyelashes, hair strands, or antenna-like fine lines MUST be distinct. If they are smeared into a single dark block (like the left-side butterfly), it is a **BLURRY-FAIL**.
+- **THE LEAF & TEXTURE LOCK**: Look for fine surface details (skin pores, fabric weave, or individual leaves). If the surface looks like a "cloud" or a smooth colored smear (like the left-side window view), it is a **BLURRY-FAIL**.
+- **MATHEMATICAL THRESHOLD**: 
+    - **Text edge**: 1px (Benchmark).
+    - **Avatar photo**: 1px → **PASS**, **>= 2px** (soft gradient/pixels) → **FAIL**.
+- **HALLUCINATION GUARD**: "1px" is a perfect digital line. If the edge is "cloudy" compared to the crisp text, it is >= 3px.
+- **SYSTEM LOCK**: If any audit log shows Img >= 2px for an avatar, you are MATHEMATICALLY FORBIDDEN from marking Category E as PASS.
 - **Triggers**: Categories D (Avatar Rendering) and E (Media & Images)
 
 **RULE 3: TEXT TRUNCATION (NAME & ROLE ONLY)**
@@ -143,15 +259,16 @@ class PromptBuilder {
 - **ABBREVIATION TOLERANCE**: Accept "Feb" vs "February" as a valid parity match.
 
 **RULE 6: FEATURE DISTINCTION (Critical)**
-- **"Show Star Ratings"** = AGGREGATE score (e.g., "4.8/5", "5 stars") appearing OUTSIDE individual cards, often with "Trusted by..." text
-- **"Show Review Ratings"** = INDIVIDUAL stars/ratings INSIDE each card, above review text
-- **Never conflate these two features**
+- **"Show Star Ratings"** = AGGREGATE score (e.g., "4.8/5", "5 stars") appearing OUTSIDE individual cards.
+- **"Show Review Ratings"** = INDIVIDUAL stars/ratings INSIDE each card.
+- **"Inline CTA"** = A specific card in the grid (often white or themed) containing promotional text like **"Ready to get started?"** and a primary button (e.g., **"Get Started"**).
+- **Never conflate these features**.
 
 **RULE 7: POPUP VALIDATION (DESIGN-AWARE)**
 - **BORDERED STATE** (Border/Shadow enabled): Must see complete rounded border closure with visible padding (min 10px).
-- **BORDERLESS STATE** (Border/Shadow disabled): "Flat wall" appearance is **PASS**. Do NOT fail based on lack of border closure.
-- **ABSOLUTE FAIL**: Mark FAIL ONLY if actual characters/letter-shapes are sliced or cut-off mid-word horizontally or vertically.
-- **PADDING TEST**: If borderless, is there still a visually distinct gap below the date? → [Visible Gap = PASS / No Gap = FAIL].
+- **BORDERLESS STATE** (Border/Shadow disabled): "Flat wall" appearance (where card touches edge) is **PASS**.
+- **THE SLICING PROOF (IRON LOCK)**: You are FORBIDDEN from reporting a "Flat Wall" or "Slicing" fail unless you can explicitly name the character (letter/number) whose shape is cut in half.
+- **LEGAL TOUCH**: If the bottom of a 'p', 'y', or 'g' touches the edge but the loop is complete and legible → **PASS**.
 - **Triggers**: Category G (Popups & Modals)
 
 **RULE 8: CASCADE FAILURES (Multi-Category Impact)**
@@ -161,27 +278,55 @@ class PromptBuilder {
 - No masking allowed—fail ALL affected categories
 
 **RULE 9: CARD IDENTIFIER REQUIREMENT**
-- EVERY failure MUST include specific identifier:
-  - Card name: "[Card: Jodie Sprague]"
-  - Element role: "[Element: Vice President Role]"
-  - Position: "[Element: Third card from left]"
+- EVERY failure MUST include the specific identifier from **SECTION 0**:
+  - Use format: "[Card: Name]" or "[ID: 33769]"
 - Generic descriptions like "The image" are FORBIDDEN without identifier
 
-**RULE 10: SPACING SYMMETRY & INTERNAL BALANCE (The 2x Rule)**
-- **EXTERNAL**: FAIL [Category A] if spacing on any side (Top vs Bottom, Left vs Right) is > 2x the opposite side.
-- **INTERNAL**: All sections within a card (Header, Body, Footer) must have visually balanced gaps.
-- **BREATHING ROOM**: Minimum 10px margin required at ALL edges.
-- **BOTTOM-SQUEEZE (CRITICAL)**: FAIL if the gap below the last line of text/date is smaller than the gap above the first line of text.
-- **ROTATION EXCEPTION**: For **CROSS_SLIDER**, the diagonal rotation (usually 10-15 degrees) is the **CORRECT ALIGNMENT**. Do NOT fail for "crooked text" or "unaligned bars" if they are diagonal.
+**RULE 10: SPACING SYMMETRY & INTERNAL BALANCE (THE SYMMETRY LOCK)**
+- **THE SYMMETRY LOCK (IRON LOCK)**: Layout 'Symmetry', 'Imbalance', and 'Squeezing' are SECONDARY to Legibility.
+- **PROOF QUOTE MANDATE**: You are FORBIDDEN from failing Category A or G for "Half-cut" or "Sliced" text unless you quote the words exactly: 'The word [WORD] is sliced in half'.
+- **FLAT-WALL PASS**: If the text inside a popup is 'Fully Readable', you are FORBIDDEN from failing Category G for a 'Flat Wall' or 'Zero Bottom Margin'. Legibility is the ONLY truth.
+- **EXTERNAL**: FAIL [Category A] ONLY if spacing on any side is > 4x the opposite side AND content is clipped.
+- **BOTTOM-SQUEEZE (LEGAL)**: If you cannot name the specific word being cut, you MUST mark this as **PASS**.
 - **Triggers**: Category A (Layout & Spacing)
-- **INDIVIDUAL CARD AUDIT**: Scan EVERY card individually across ALL screenshots
 
-**RULE 11: SKELETON LOADER AUDIT**
-- FAIL [Category C] if review text is rendered as solid grey/colored bars (skeleton states) with no distinct letter shapes.
-- **TRANSCRIPTION TEST**: If you cannot transcribe at least 3 distinct words because they are "rectangles" or "blocks" → respond "ACTUAL_BAR_FAILURE".
-- **SKELETON HYDRATION**: Even if review body is a skeleton, you MUST scan the footer for "Show Review Date" and "Read More". Do NOT mark them Absent just because the body is a skeleton.
-- **EXISTENCE LOCK**: If you identify skeleton bars, a Date, or "Read More", then **Category G (Popups & Modals)** MUST be marked as Visible. You are prohibited from saying "No popup visible" if you found its internal elements.
-- **Triggers**: Category C (Content & Text Rendering)
+**RULE 11: STANDALONE CTA BANNERS (TOPOLOGY)**
+- **BANNER DETECTOR**: Inline CTA may appear as a **WIDE HORIZONTAL BANNER** (separate from the review grid).
+- **SIGNATURE**: Contains "Ready to get started?" or similar text + a primary colored button (e.g., "Get Started ↗").
+- **MANDATE**: If this banner is visible ANYWHERE on the page (even outside the card grid), you MUST report "Inline CTA: Visible".
+
+============================================================
+🚨 FEATURE-SPECIFIC AUDITS (IRON LOCK) 🚨
+============================================================
+
+**RULE 11: SKELETON & DATA-AWARE HYDRATION AUDIT (IRON LOCK)**
+- **STEP 1: SKELETON DETECTION**: If a card shows gray "skeleton" bars (rectangles) instead of text:
+    - You MUST still perform the **SECTION 0 LOOKUP**.
+    - **RULE 11.A (THE NULL OVERRIDE)**: If SECTION 0 shows \`rating: null\` or \`0\`, the absence of stars is a **PASS**, even if the rest of the card is a skeleton.
+    - **RULE 11.B (THE DATA FAIL)**: Only FAIL if the data says \`rating > 0\` but the skeleton hasn't loaded it yet.
+    - **RULE 11.C (FORCE PASS)**: If applying RULE 11.A, you MUST include the keyword **SKELETON_PASS_FORCE** in your reasoning to prevent manual overrides.
+
+**RULE 12: RATING VISIBILITY (HYBRID & MULTI-COLOR)**
+- **PASS CRITERIA**: If ratings are visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
+- **HYBRID SUPPORT**: A card may show **Stars AND Numbers** (or Tacos) together. If you see ANY combination, it is a **PASS**.
+- **SIGNATURES**: 
+    - **TYPE A (STARS)**: Single or Repetitive star icons (any color).
+    - **TYPE B (NUMERICAL)**: Numbers (e.g., "10", "9.33") in colored badges/circles/boxes.
+    - **TYPE C (CUSTOM)**: Repetitive icons like **Tacos**, Hearts, or Dots.
+- **COLOR**: Any color (Yellow, Green, Purple, Blue, etc.) is valid.
+- **DOM_TRUTH**: If SECTION -1 shows a detection (e.g., "STARS + NUMERICAL"), you MUST report Visible.
+
+**RULE 13: SOCIAL PLATFORM ICON (ANY ICON/COLOR)**
+- **PASS CRITERIA**: If a platform icon or brand logo is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
+- **SIGNATURES**: Logos (Google, Fresha) or small circular/square brand icons in the top-right corner. Any color is valid.
+
+**RULE 14: DATE VALIDATION (ANY-CARD PRINCIPLE)**
+- **PASS CRITERIA**: If a formatted date (e.g., "Feb 10, 2026") is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
+- **FORMAT**: Must match "Month DD, YYYY" or similar.
+- **STRICT PASS/FAIL**:
+    - **PASS**: If date matches "Month DD, YYYY" (3-letter month or full month name, plus day, comma, and year).
+    - **FAIL**: If format is slightly off (e.g., missing comma, "DD-MM-YYYY", or "2026-04-07").
+- **RELIABILITY LOCK**: If you find a date string in your audit, identify its format. If it matches the gold standard, you are PROHIBITED from flagging it as FAIL.
 `;
 
     // ============================================================
@@ -388,13 +533,15 @@ Q4. Card dimensions consistent? → [CONSISTENT / INCONSISTENT]
 - Apply RULE 1 (Sharpness) to all visible images`,
     };
 
-    const layoutPreAnalysis = widgetLayoutPreAnalysis[widgetType];
+    let layoutPreAnalysis = widgetLayoutPreAnalysis[widgetType];
 
     if (!layoutPreAnalysis) {
-      throw new Error(
-        `[PromptBuilder] No layout pre-analysis defined for widget type: "${widgetType}". ` +
-        `Add it to widgetLayoutPreAnalysis before proceeding.`
-      );
+      console.warn(`[PromptBuilder] ⚠️  No pre-analysis for "${widgetType}". Using GENERIC_GRID fallback.`);
+      layoutPreAnalysis = `
+**GENERIC_GRID — WIDGET-SPECIFIC CHECKS:**
+Q1. All cards fully visible? → [YES / PARTIAL]
+Q2. Grid symmetrical? → [YES / NO]
+- Apply RULE 1 (Sharpness) to all images`;
     }
 
     // ============================================================
@@ -428,8 +575,10 @@ Q5. Avatar overflowing circular boundary? → [NO / YES]
     - **REVIEW BODY**: Elipsis here is **PASS**.
     - **TRANSCRIPTION**: Transcribe first row of Name for any failing card.
 Q3. **READ MORE AUDIT**: Apply RULE 5—literal words "Read More" present?
-    - Quote its text and color: → ["[Color] Read More" / "ABSENT-ELLIPSIS-ONLY"]
-    - **CRITICAL**: "..." alone is NOT "Read More".
+    - **ANY CARD PRINCIPLE**: It is **NOT mandatory** for all cards to have "Read More". It only appears on long reviews.
+    - **PASS CRITERIA**: If "Read More" is visible on **ANY** card in the widget, report UI Status: **Visible** and Verdict: **PASS**.
+    - **ELLIPSIS**: "..." alone on some cards is acceptable if "Read More" text is present elsewhere.
+    - Quote its text and color: → ["[Color] Read More" / "ABSENT"]
 Q4. **DATE AUDIT**: Grey date text visible? Quote format: → ["[Month DD, YYYY]" / "ABSENT"]
 
 - **MANDATORY REVIEWER AUDIT LOG (PER-CARD ANALYSIS)**:
@@ -442,9 +591,9 @@ Q5. Avatar sizes consistent across cards? → [CONSISTENT / INCONSISTENT]
 - Apply RULE 1 (Sharpness Benchmark) and RULE 9 (Identifiers)
 Q1. Broken image icons or gray placeholder boxes? → [NO / YES—specify card]
 Q2. Photos/logos stretched/squished (funhouse mirror)? → [NO / YES—describe]
-Q3. **SHARPNESS BENCHMARK**: 
-    - Compare photo/logo detail to sharpest text
-    - Image soft/grainy compared to text? → [Passing - SHARP / Failing - BLURRY]
+Q3. **SHARPNESS BENCHMARK (MANDATORY)**: 
+    - Perform the **CATWALK COMPARISON**: Image A (Keith) vs Image B (Polar Bear).
+    - Image soft/grainy/smeared compared to sharp text or adjacent cards? → [Passing - SHARP / Failing - BLURRY-FAIL]
     - **If no images**: → "Passing - SHARP (N/A)"
 Q4. All media fully visible within container? → [FULLY VISIBLE / PARTIALLY HIDDEN]
 
@@ -496,13 +645,10 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 ============================================================
 
 **AVATAR_GROUP:**
-- **STAR RATING AUDIT**: Scan for yellow/gold star icons (★) in TWO places:
-  1. Main widget area (Aggregate): Below "Loved & Trusted..." text.
-  2. Inside Popups (Individual): Near the green/red platform badge.
-- If ANY star is visible → "Show Star Ratings" = Visible.
-- **Show Platform Icon**: Logo in TOP RIGHT of popup, inline with reviewer name.
+- **STAR RATING AUDIT**: Apply RULE 12 in TWO places: Aggregate (Below "Loved & Trusted...") and Popups.
+- **Show Social Platform Icon**: Apply RULE 13 (TOP RIGHT of popup).
 - **Read More**: Apply RULE 5—if config show_full_review=0, look for link in popup text
-- **Review Date**: Bottom-left of popup ("Jan 25, 2025" or "2024")
+- **Review Date**: Apply RULE 14 (Bottom-left of popup)
 - **Inline CTA**: Styled button with arrow (↗) at bottom of popup
 
 **AVATAR_CAROUSEL:**
@@ -516,24 +662,24 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - Scan ALL individual review cards
 - **Left & Right Buttons**: Arrow controls (< >) on left/right widget edges
 - **Slider Indicators**: Dots/lines at absolute bottom
-- **Show Social Platform Icon**: Logo/icon/text in TOP RIGHT of each card
-- **Show Review Ratings**: Star icons inside EACH card, below reviewer name
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
 - **Read More**: Apply RULE 5—at bottom of text in each card
 - **Inline CTA**: Styled button with arrow (↗) at bottom of card
-- **Review Date**: Strict "Month DD, YYYY" format in bottom-left
-- **VIDEO EXCEPTION**: Cards with Play button may lack Social Icons
+- **Review Date**: Apply RULE 14 (in bottom-left)
 
 **SINGLE_SLIDER:**
 - Multiple screenshots show different reviews (avatar click reveals)
 - Review content appears ABOVE avatar row
-- **Show Social Platform Icon**: Logo to the RIGHT of reviewer name
-- **Show Review Ratings**: Stars in review area above avatars
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
 - **Read More**: Apply RULE 5
 
 **FLOATING_TOAST:**
 - Small preview + large expanded modal
-- **Small card**: Check Social Icon (top-right) and stars
-- **Expanded modal**: Check Read More, Date, Inline CTA
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
+- **Expanded modal**: Check Read More, Date (RULE 14), Inline CTA
 - **Inline CTA**: Styled button with arrow (↗) at bottom of expanded review
 
 **MARQUEE_STRIPE:**
@@ -541,10 +687,10 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - **ALGORITHM**:
   1. Find reviewer NAME string
   2. Look IMMEDIATELY after last character
-  3. Tiny letter/badge/logo there → Social Icon Visible
+  3. Tiny letter/badge/logo there → Apply RULE 13
   4. Also check TOP RIGHT of popup for colored logo
-- **Show Review Ratings**: Gold/yellow/green stars inside cards AND popups
-- **Show Review Date**: Small grey footer text
+- **Show Review Ratings**: Apply RULE 12 (Log BOTH cards and popups)
+- **Show Review Date**: Apply RULE 14 (Small grey footer text)
 - **Read More**: Apply RULE 5
 - **Inline CTA**: Large styled button at popup bottom with MANDATORY arrow (↗)
 
@@ -572,17 +718,17 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 **MARQUEE (Horizontal):**
 - Multiple cards scrolling left-right, possibly multi-row
 - Scan EVERY card individually
-- **Show Social Platform Icon**: Logo in TOP RIGHT of each card
-- **Show Review Ratings**: Stars in each card, below reviewer name
-- **Show Review Date**: Any date text in any card
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
+- **Show Review Date**: Apply RULE 14
 - **Read More**: Apply RULE 5
 
 **MARQUEE (Vertical):**
 - Cards scrolling up-down
 - Scan EVERY visible card
-- **Show Social Platform Icon**: Logo in TOP RIGHT of each card
-- **Show Review Ratings**: Stars in each card, below reviewer name
-- **Show Review Date**: Any date text in any card
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
+- **Show Review Date**: Apply RULE 14
 - **Read More**: Apply RULE 5
 - **Left & Right Buttons**: Mark ABSENT (not used in vertical)
 
@@ -590,9 +736,9 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - Multi-column brick layout
 - **Read More**: Apply RULE 5—literal "Read More" after text, before date
 - **EAGLE EYE**: If "..." present, zoom in between text end and date
-- **Show Social Platform Icon**: Logo in TOP RIGHT of each card
-- **Show Review Ratings**: Stars inside each card
-- **Show Review Date**: Footer text in any card
+- **Show Social Platform Icon**: Apply RULE 13
+- **Show Review Ratings**: Apply RULE 12
+- **Show Review Date**: Apply RULE 14
 - **Show Load More Button**: Large button at absolute bottom center
 - **Inline CTA**: Scan for distinct non-review cards with a large primary-colored button (e.g., "Get Started" or "Join Now").
 `;
@@ -638,7 +784,7 @@ REPORTING LOGIC & JSON OUTPUT
 - (UI: Visible) + (Config: Visible) => PASS
 - (UI: Visible) + (Config: Absent) => FAIL (Unintended Feature)
 - (UI: Absent) + (Config: Visible) => FAIL
-- (UI: Absent) + (Config: Absent) => PASS
+- (UI: Absent) + (Config: Absent) => Not Applicable
 
 **MISSING CONFIG RULE:**
 If a config key is MISSING/UNDEFINED → assume expected state is "Absent"
@@ -734,7 +880,7 @@ Provide mandatory audit trace (chain of thought) as text preamble, then return R
       "config_status": "Visible/Absent/N/A",
       "issue": "[Format: '[Element: Identifier] shows [problem] causing [impact]' OR 'No visual defects detected']",
       "remarks": "[Diagnostic summary with identifier]",
-      "status": "PASS/FAIL"
+      "status": "PASS/FAIL/Not Applicable"
     }
   ],
   "aesthetic_results": [
@@ -783,6 +929,8 @@ Provide mandatory audit trace (chain of thought) as text preamble, then return R
   ],
   "overall_status": "PASS if ALL features PASS and NO Aesthetic issues, else FAIL"
 }
+
+**MANDATORY AUDIT TRACE**: End of Prompt.
 `;
   }
 }
