@@ -2,9 +2,8 @@
     "features": [
         "Inline CTA",
         "Show Review Ratings",
-        "Show Social Platform Icon"
-    ],
-    "commented_features": [
+        "Show Social Platform Icon",
         "Feedspace Branding"
-    ]
+    ],
+    "commented_features": []
 }

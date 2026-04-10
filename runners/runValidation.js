@@ -68,7 +68,7 @@ async function run() {
         const heightArg = args.find(a => a.startsWith('--height='))?.split('=')[1] || (args[args.indexOf('--height') + 1]);
 
         this.targetWidth = widthArg ? parseInt(widthArg) : 1920;
-        this.targetHeight = heightArg ? parseInt(heightArg) : 700;
+        this.targetHeight = heightArg ? parseInt(heightArg) : 1080;
 
         if (urlArg) {
             console.log(`[Main] Targeting single URL via CLI: ${urlArg}`);
@@ -133,7 +133,7 @@ async function run() {
 
             // Create a fresh context for each attempt to avoid state contamination or session crashes
             const context = await browser.newContext({
-                viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 700 },
+                viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 1080 },
                 deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 locale: 'en-US',

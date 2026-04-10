@@ -13,7 +13,7 @@ class PromptBuilder {
       "Read More": "show_full_review",
       "Show Social Platform Icon": "show_platform_icon",
       "Inline CTA": "cta_enabled",
-      "Feedspace Branding": "allow_to_remove_branding",
+      "Feedspace Branding": "hideBranding",
       "Review Card Border & Shadow": ["is_show_border", "is_show_shadow"],
       "Show Star Ratings": "show_star_ratings",
       "Widget position": "widget_position",
@@ -23,7 +23,8 @@ class PromptBuilder {
     };
 
     const invertedFeatures = {
-      "Read More": true
+      "Read More": true,
+      "Feedspace Branding": true
     };
 
     const featuresToTest = (staticFeatures && staticFeatures.length > 0)
@@ -60,10 +61,6 @@ class PromptBuilder {
           } else {
             expected = "Absent";
           }
-        }
-
-        if (featureName === "Feedspace Branding") {
-          expected = "N/A";
         }
 
         // --- DATA-AWARE OVERRIDE (GRANULAR RATING LOGIC) ---
@@ -130,10 +127,58 @@ class PromptBuilder {
     const coreRules = `
 ${sensoryTruth}
 ============================================================
+🚨 PRIMARY AUDITOR LOCK (READ FIRST) 🚨
+============================================================
+1. **MULTI-FAULT MANDATE**: You are PROHIBITED from stopping at the first defect. If an image is blurry AND the layout is clipped/overlapped, YOU MUST PROVIDE BOTH REASONS. A quality failure does not mask a layout failure.
+2. **ZERO TOLERANCE**: If Rule 0 or Rule 1 triggers, you are FORBIDDEN from reporting any Category as PASS. Mark ALL affected categories as FAIL.
+3. **TEXT-IMAGE SYNC**: If the text is crisp but the image is "soft", "fuzzy", or "grainy", YOU MUST FAIL CATEGORY E.
+
+🚨 RULE 0: EXISTENCE & COMPLETENESS LOCK (PRIMARY MANDATE)
+============================================================
+1. **WIDGET DETECTION**: Can you see a COMPLETE Feedspace widget (Stars, Logo, Review Cards)? 
+2. **THE SLIVER-FAIL**: If the widget is "partially cut" (e.g., only a corner, a top sliver, or a fragmented edge is visible), you MUST report UI Status: **Absent** and Verdict: **FAIL**.
+3. **THE COMPLETE PERIMETER LOCKDOWN (FLOATING ASSETS)**: You are FORBIDDEN from reporting UI Status: **Visible** or Verdict: **PASS** for any floating element (Toast, Popup, Tooltip, Avatar-Group Card) unless you can provide a **Physical Description** of its bottom-most boundary:
+   - **Mandatory Logic**: "I can see the complete [Color] bottom boundary (Border/Shadow) and [Rounded/Sharp] corners. Below this border, I see ~10px of [Background Color] whitespace."
+   - **THE BACKGROUND-AIR TEST**: If the card border is the very last thing in the image (no whitespace below it), or if it 'bleeds' into the page edge, you MUST trigger **FAIL_LAYOUT_CLIPPED**.
+4. **RULE 19: THE PERIMETER CLEARANCE MANDATE (Text & Ratings)**: Specifically audit the last visible line of content on every review card (Descenders OR Stars).
+   - **THE GUTTER CHECK**: You MUST zoom your attention to the **BOTTOM EDGE** of the card content.
+   - **RASTER PROOF (AUTO-FAIL)**: You are FORBIDDEN from reporting a PASS for layout unless you can state the **Pixel Gutter Count** (e.g., "There are ~8px of white space below the stars").
+   - **ZERO-GAP FAIL**: If a letter tail OR a Star point is touching the card border, or if there is < 4px of 'air' below it, you MUST report **SQUEEZED-FAIL** and token **FAIL_LAYOUT_CLIPPED**.
+   - **PRE-ANALYSIS MANDATE**: If you identify **ACTUAL_SQUEEZE_DETECTED** in your step-by-step thinking (Pre-Analysis), you are PROHIBITED from reporting a PASS for Category A.
+   - **THE SLICE-FAIL**: If the "tails" of these letters are flat, missing, or truncated horizontally, it is a clinical **FAIL_TEXT_TRUNCATED**. 
+   - **TRANSCRIPTION TEST (EXPANDED POPUPS)**: For expanded popups, you MUST compare the last word in the screenshot to the last word in the Ground Truth JSON (SECTION 0). 
+   - **DOT-FAIL MANDATE**: If a word ends in multiple dots (e.g., "kn...", "know..", or "...."), it is a clinical **FAIL_TEXT_TRUNCATED**. 
+   - **WORD-SYNC**: If JSON ends with "know" but screenshot says "kn..." or has an ellipsis not in the source, trigger **FAIL_TEXT_TRUNCATED**.
+5. **LIQUID VIEWPORT SCAN**: Specifically check the BOTTOM and RIGHT edges. If a card ends in a sharp, non-rounded vertical line (rectilinear cut), it is a clinical **FAIL_LAYOUT_CLIPPED**.
+6. **CORNER SYMMETRY AUDIT**: You must verify that the Top-Right and Bottom-Right corners mirror their Left-Hand counterparts. If the left side is rounded but the right side is sharp, it is a clinical **FAIL**.
+7. **FOREIGN POPUP BLOCKAGE**: If a Cookie Consent, Chat Bubble, or Modal is overlapping/blocking the widget, you MUST report **FAIL** and use the token **FAIL_LAYOUT_BLOCKED**.
+
+🚨 RULE 1: THE FORENSIC DETAIL MANDATE (ZERO TOLERANCE)
+============================================================
+- **THE MICRO-TEXTURE HANDSHAKE**: You are PROHIBITED from reporting a PASS for sharpness unless you can prove **1px Micro-Texture Presence**.
+- **Digital Benchmark**: The Name/Role text has razor-sharp 1px edges.
+- **Forensic Proof**: Look for the thinnest possible detail in the image (eyelashes, individual hair strands, 1px logo grain).
+- **THE "SMOOTHNESS" FAIL**: If an image looks "smooth", "clean", or "creamy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
+- **DIFFERENTIAL SHARPNESS AUDIT (COMPARISON REFERENCE MANDATE)**:
+    - You MUST compare a target photo (e.g., "Jennifer W." avatar) to a reference vector (e.g., the name "Jennifer W.").
+    - **Logic**: "The text 'Jennifer W.' has razor edges @ 1px, but the avatar photo has muddy edges @ 3-5px."
+    - **Trigger**: If the disparity is > 1px in edge-width, you MUST report **FAIL_HYBRID_SHARPNESS**.
+    - **Prohibited Phrase**: You are BANNED from saying "Appears sharp" unless you name the reference element you used to prove it.
+- **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
+
+============================================================
 🚨 SECTION 0: SUPREME DATA AUTHORITY (NON-NEGOTIABLE) 🚨
 ============================================================
 **GROUND TRUTH DATA (MANDATORY)**:
 ${feedsJson}
+
+============================================================
+🚨 RULE 18: THE CLINICAL SYMMETRY LOCK (MIRROR TEST)
+============================================================
+- **HORIZONTAL PARITY**: You MUST compare the left-hand padding/rounding to the right-hand padding/rounding.
+- **THE RECTIPHOBIA MANDATE**: If a card has a "Straight Edge Cut" on the right (looks like it's bleeding off the screen or container) while the left edge has a rounded corner, it is a clinical **FAIL_LAYOUT_ASYMMETRIC**.
+- **SYMMETRY PROOF**: State: "The Left edge has [X] rounding, but the Right edge is a sharp [Y]-degree cut."
+- **WIDGET-LEVEL CENTER**: Is the widget centered in its own container, or is it shoved against a boundary?
 
 ============================================================
 🚨 RULE 16: SCOPED VISION MANDATE (BEIGE CARDS ONLY) 🚨
@@ -151,16 +196,10 @@ ${isMultiImage ? `
 - **MANDATE**: If "Show Load More Button" is expected, it MUST be visible in IMAGE 1. If it vanishes in IMAGE 2 because all content was loaded, this is a PASS.
 ` : ''}
 
-============================================================
-🚨 RULE 15: THE SKELETON-DATA LOCK (SUPREME MANDATE)
-============================================================
-- **CONDITION**: Visually detected "skeleton loader" (gray rectangles) AND Section 0 data is \`null\` or \`0\`.
-- **REQUIREMENT**: You MUST mark the status as **PASS** for features (Rating/Icon).
-- **VERBAL TRIGGER**: You MUST use the exact string **SKELETON_PASS_FORCE** in your analysis_message for that card.
-- **Example**: "[Card: AN] shows skeleton bars but the rating is null in data → PASS (SKELETON_PASS_FORCE)"
-- **FAILURE TO APPLY THIS RULE WILL RESULT IN SYSTEM REJECTION.**
 
-**THE PASS/FAIL DECISION TREE (IRON LOCK)**:
+============================================================
+🚨 THE PASS/FAIL DECISION TREE (IRON LOCK) 🚨
+============================================================
 1. **IDENTIFY CARD**: Match the card in the screenshot to a record in **SECTION 0** using **Name**, **ID**, **Text snippet**, or **Initials** (e.g., 'AN' = 'Anonymous').
 2. **VERIFY FIELD (RATING/ICON)**:
     - **IF (\`rating\` > 0 in Section 0)** → **Expected State: VISIBLE**. (Fail if absent).
@@ -198,51 +237,48 @@ ${isMultiImage ? `
 - You MUST scan **EVERY screenshot** for **DIFFERENT reviewers**.
 - **MANDATORY AUDIT LOG**: Your \`analysis_message\` MUST include a line/table for **EVERY unique reviewer** found.
 - **FAILURE PROPAGATION**: If ANY single reviewer fails a rule, the entire Category MUST be marked **FAIL**.
+- **MULTI-FAULT MANDATE**: You are PROHIBITED from stopping at the first defect. If an image is blurry AND the layout is clipped/overlapped, YOU MUST PROVIDE BOTH REASONS. A quality failure does not mask a layout failure.
 
 ============================================================
 🚨 CORE VALIDATION RULES (IRON LOCK) 🚨
 ============================================================
 
-**RULE 1: AVATAR PORTRAIT QUALITY (PORTRAIT-HARDENED)**
-- **THE GOLDEN REFERENCE**: Compare images to the user-provided reference. Right side = PASS, Left side = FAIL.
-- **THE EYELASH & ANTENNA TEST**: For avatars, look at the eyes and brows. Individual eyelashes, hair strands, or antenna-like fine lines MUST be distinct. If they are smeared into a single dark block (like the left-side butterfly), it is a **BLURRY-FAIL**.
-- **THE LEAF & TEXTURE LOCK**: Look for fine surface details (skin pores, fabric weave, or individual leaves). If the surface looks like a "cloud" or a smooth colored smear (like the left-side window view), it is a **BLURRY-FAIL**.
-- **MATHEMATICAL THRESHOLD**: 
-    - **Text edge**: 1px (Benchmark).
-    - **Avatar photo**: 1px → **PASS**, **>= 2px** (soft gradient/pixels) → **FAIL**.
-- **HALLUCINATION GUARD**: "1px" is a perfect digital line. If the edge is "cloudy" compared to the crisp text, it is >= 3px.
-- **SYSTEM LOCK**: If any audit log shows Img >= 2px for an avatar, you are MATHEMATICALLY FORBIDDEN from marking Category E as PASS.
+**RULE 1: THE FORENSIC DETAIL MANDATE (ZERO TOLERANCE)**
+- **THE MICRO-TEXTURE HANDSHAKE**: You are PROHIBITED from reporting a PASS for sharpness unless you can prove **1px Micro-Texture Presence**.
+    - **Digital Benchmark**: The Name/Role text has razor-sharp 1px edges.
+    - **Forensic Proof**: Look for the thinnest possible detail in the image (eyelashes, individual hair strands, 1px logo grain).
+    - **THE "SMOOTHNESS" FAIL**: If an image looks "smooth", "clean", or "creamy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
+- **THE CLOUD-TRIGGER**: If an image matches the **LEFT SIDE** of the benchmark samples (Watercolor/Cloud effect), it is an absolute FAIL.
+- **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
+- **HALLUCINATION BLOCK**: Do not "repair" the image in your mind. If you cannot see razor-sharp grain matching the 'l' in the name, it is a FAIL.
 - **Triggers**: Categories D (Avatar Rendering) and E (Media & Images)
 
-**RULE 3: TEXT TRUNCATION (NAME & ROLE ONLY)**
-- **Audit Domain**: **Reviewer Name** and **Job Role** only.
-- **IGNORE**: Review Body (Review body truncation is PASS).
-- **FAIL**: Any "..." (ellipsis) in the **First Line** of Name or Job Role.
-- **FAIL**: Characters cut off or sliced in the middle.
-- **OUTPUT**: Add to audit table: "[Name] [Field]: ... detected → FAIL" (Use keywords: clipped-fail, sliced-fail)
-
 **RULE 2: EDGE INTEGRITY (Card Clipping & Containment)**
-- ALL cards must show complete boundaries (all 4 edges visible)
-- Rounded corners must be fully visible (no 90° sharp chops)
-- **"Flat wall"** (0px padding at container edge) → FAIL
-- Rightmost/leftmost card narrower than peers → FAIL "Card width parity"
-- Content must NOT touch container edges (minimum 10px padding)
+- ALL cards must show complete boundaries (all 4 edges visible).
+- **THE SLIVER-AUDIT**: If the widget is clipped at the viewport edge (only a sliver visible), mark as **FAIL_LAYOUT_CLIPPED**.
+- Rounded corners must be fully visible (no 90° sharp chops).
+- **"Flat wall"** (0px padding at container edge) → FAIL using token **FAIL_LAYOUT_FLAT_WALL**.
+- Rightmost/leftmost card narrower than peers → FAIL "Card width parity".
+- Content must NOT touch container edges (minimum 10px padding).
 - **TEXT-GRAPHIC COLLISION (ZERO TOLERANCE)**:
-    - If ANY character (Name, Role, or Body) overlaps the avatar/logo boundary → **FAIL**.
+    - If ANY character (Name, Role, or Body) overlaps the avatar/logo boundary → **FAIL** using token **FAIL_CONTAINMENT_COLLISION**.
     - Look for "Character Slicing": If a letter sits on top of the image color, it is a defect.
-- **Bottom edge test**: Must see complete rounded border + whitespace below
-- **Right edge test**: Must see whitespace to the right (not vertical chop)
-- **Triggers**: Categories A (Layout), B (Containment), G (Popups)
+- **BLEEDING DETECTION (ZERO TOLERANCE)**:
+    - If ANY element (Stars, Footer, Avatar) touches or overlaps the container border line, it is defined as **BLEEDING**.
+    - Trigger: **FAIL_LAYOUT_CLIPPED**.
+- **Triggers**: Categories A (Layout), B (Containment), G (Popups).
 
-**RULE 3: FIRST-LINE TRUNCATION (Pixel-Based Edge Audit)**
-- **SCOPE (CRITICAL)**: Concentrate ONLY on the **NAME** and **JOB ROLE** (Designation) fields for truncation. 
-- **REVIEW BODY EXCEPTION**: Truncation in the **Review Body** is a **PASS** (it is expected/valid behavior). Do NOT report Body truncation.
+**RULE 3: FIRST-LINE TRUNCATION (NAME & ROLE ONLY)**
+- **Audit Domain**: **Reviewer Name** and **Job Role** (Designation) fields only.
+- **REVIEW BODY POLICY**: 
+    - **GRID/MARQUEE**: Truncation in the **Review Body** is a **PASS** (expected behavior).
+    - **EXPANDED POPUPS/MODALS (Avatar Group, Toast, Carousel Popup)**: Any truncation in the review body is a clinical **FAIL**. If the text is mid-sentence or mid-word, it is a FAIL.
 - **FAIL CRITERIA**: FAIL ONLY if the ellipsis ("...") appears on the **FIRST line** of the **NAME** or **JOB ROLE**.
-- **User Example (FAIL)**: **Jesse Cooke** (Single line NAME ends in "...").
-- **User Example (PASS)**: **Review Body** ending in "..." (Valid state).
-- **JSON LEAKAGE**: FAIL [Category C] if the review body contains JSON-like structures (e.g., '{"pros":...', 'null', '{"cons":...') instead of natural language.
+- **MANDATORY TRIGGER**: If failing, use the exact token **FAIL_CONTENT_TRUNCATED**.
+- **FAIL**: Characters cut off or sliced in the middle.
+- **JSON LEAKAGE**: FAIL [Category C] if the review body contains JSON-like structures (e.g., '{"pros":...', 'null', '{"cons":...') instead of natural language. Use token **FAIL_CONTENT_JSON_LEAK**.
 - **LITERAL NAME TRANSCRIPTION**: For Category C, you MUST transcribe the first line of the **NAME** to prove truncation.
-- **Triggers**: Category C (Content & Text Rendering)
+- **Triggers**: Category C (Content & Text Rendering).
 
 **RULE 4: GHOST CARDS (Invisible/Illegible Text)**
 - White-on-white text → FAIL
@@ -250,13 +286,15 @@ ${isMultiImage ? `
 - Text color matching background → FAIL
 - **Triggers**: Categories C (Content) and F (Theme & Color)
 
-**RULE 5: READ MORE / DATE SEARCH (TWO-PASS AUDIT)**
+**RULE 5: READ MORE / DATE SEARCH (LITERAL-EYE MANDATE)**
 - **TWO-PASS MANDATE**: You MUST perform two separate visual passes:
     1.  **PASS 1 (Body)**: Audit the review text/body for defects.
-    2.  **PASS 2 (Footer)**: Zoom your attention specifically to the **BOTTOM-LEFT CORNER** of the card (the last ~50 pixels of height).
-- **DEFECT ISOLATION**: If you see "Read More" or a Date in the bottom-left, it is **PASS (Visible)**. You are PROHIBITED from marking it "Absent" just because the body has JSON leakage or Skeleton loaders.
-- **LITERAL TRUTH**: If legible to the human eye → Visible.
-- **ABBREVIATION TOLERANCE**: Accept "Feb" vs "February" as a valid parity match.
+    2.  **PASS 2 (Footer)**: Zoom your attention specifically to the **BOTTOM-LEFT CORNER** of the card.
+- **LITERAL TRUTH ABOVE CONFIG**: If you cannot see the literal glyphs "Read" and "more", it is **ABSENT**. You are PROHIBITED from reporting "Visible" based on an ellipsis ("...") or because the config expects it.
+- **PASS CRITERIA**: ONLY report "Visible" if the literal words "Read more" or "Show More" are transcribed from the pixels.
+- **"..." IS NOT READ MORE**: An ellipsis \`...\` alone is an **ABSENT** state for this feature.
+- **MANDATORY**: Quote the text and color (e.g., "Blue Read More") to verify visibility.
+
 
 **RULE 6: FEATURE DISTINCTION (Critical)**
 - **"Show Star Ratings"** = AGGREGATE score (e.g., "4.8/5", "5 stars") appearing OUTSIDE individual cards.
@@ -288,12 +326,52 @@ ${isMultiImage ? `
 - **FLAT-WALL PASS**: If the text inside a popup is 'Fully Readable', you are FORBIDDEN from failing Category G for a 'Flat Wall' or 'Zero Bottom Margin'. Legibility is the ONLY truth.
 - **EXTERNAL**: FAIL [Category A] ONLY if spacing on any side is > 4x the opposite side AND content is clipped.
 - **BOTTOM-SQUEEZE (LEGAL)**: If you cannot name the specific word being cut, you MUST mark this as **PASS**.
-- **Triggers**: Category A (Layout & Spacing)
 
-**RULE 11: STANDALONE CTA BANNERS (TOPOLOGY)**
-- **BANNER DETECTOR**: Inline CTA may appear as a **WIDE HORIZONTAL BANNER** (separate from the review grid).
-- **SIGNATURE**: Contains "Ready to get started?" or similar text + a primary colored button (e.g., "Get Started ↗").
-- **MANDATE**: If this banner is visible ANYWHERE on the page (even outside the card grid), you MUST report "Inline CTA: Visible".
+**RULE 11: VIEWPORT TRUNCATION & BANNERS**
+- **ZERO TOLERANCE**: If any part of the widget is missing (tiny sliver or 80%) → **FAIL Category A**.
+- **BOUNDARY MASK**: If a card hits the bottom/right edge without a closing border/shadow → **FAIL**.
+- **POPUP INTEGRITY**: For popups (Avatar Group), YOU MUST see a complete rounded bottom border or a visible shadow cast on the background. If the card ends in a sharp white line at the image edge → **FAIL Category A**.
+- **GEOMETRIC PARITY**: Every card MUST show 4 rounded corners. Top-only rounded = **FAIL**.
+- **BANNER DETECTOR**: Inline CTA may appear as a **WIDE HORIZONTAL BANNER**. Signature: Contains "Ready to get started?" text + a primary colored button (e.g., "Get Started ↗").
+- **MANDATE**: If visible ANYWHERE on the page, you MUST report "Inline CTA: Visible".
+- **Triggers**: Category A (Layout & Spacing).
+
+**RULE 12: RATING VISIBILITY (HYBRID & MULTI-COLOR)**
+- **SIGNATURES**: Supports Stars, Numerical badges, Tacos, Hearts, Dots.
+- **DOM_TRUTH**: If Section -1 shows detection, you MUST report Visible.
+
+**RULE 13: SOCIAL PLATFORM ICON (POSITION LOCK)**
+- **CONFIG INDEPENDENCE (CRITICAL)**: You MUST report "Visible" if you see a Facebook, Google, Yelp, or Brand logo in the Top-Right, **EVEN IF** SECTION 0 says "Manual" or "N/A" and Config says "Absent".
+- **THE GOOGLE SIGNAL**: Look specifically for the 4-color 'G' insignia or a monochromatic brand badge anchored in the Top-Right.
+- **LOCATION**: Top-Right corner of the review card boundary ONLY.
+- **LEFT-SIDE PROHIBITION**: Do NOT use the top-left Feedspace "F" logo to satisfy Rule 13.
+
+**RULE 14: DATE VALIDATION (STRICT-FORMAT Mandate)**
+- **FORMAT REQUIREMENT**: Must match "Month DD, YYYY" (e.g., "Jan 10, 2024" or "January 10, 2024").
+- **COMPONENTS**: Must contain (1) Month Name (3-letter or full), (2) Day Number, (3) Comma, and (4) 4-digit Year.
+- **LOCATION (MANDATORY)**: The date MUST be anchored in the **absolute bottom-left corner** of the review card boundary.
+- **FORBIDDEN (REPORT AS ABSENT)**: "Month Year" (e.g., "October 2025"), "MM/DD/YYYY", or any format missing the day, comma, or positioned anywhere other than the bottom-left. 
+- **LITERAL TRUTH**: If you see a date that does NOT match this exact format or location, you MUST report UI Status: **Absent**.
+- **REGRESSION LOCK (CRITICAL)**: If "Show Review Date" is reported as **Visible** in the UI but the **Config Status** is **Absent**, you MUST report Verdict: **FAIL** and trigger the token **VIOLATION: Product Regression**.
+- **Triggers**: Category C (Text) or Category G (Date check).
+
+**RULE 15: THIRD-PARTY INTERFERENCE (COLLISION LOCK)**
+- **THE COLLISION-FAIL**: Audit for NON-Feedspace elements (e.g., WhatsApp Bubbles, Accessibility "Key" Icons, GDPR Banners, Chat Tabs) overlapping the widget.
+- **ZERO TOLERANCE**: If a third-party icon covers even 1px of a Feedspace card, logo, or text, it is an absolute **FAIL Category B**.
+- **MANDATORY TOKEN**: Use the exact token **FAIL_ELEMENT_OVERLAP**.
+- **Triggers**: Category B (Element Containment).
+- **PASS CRITERIA**: If the formatted date is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
+- **STRICT FAIL**: FAIL if the format is "Month Year" (missing the Day) or missing the comma.
+- **MANDATORY TRIGGER**: If the day number or comma is missing, you MUST use the token **FAIL_DATE_RULE14**.
+- **RELIABILITY LOCK**: If the format matches the gold standard, you are PROHIBITED from flagging it as FAIL.
+
+**RULE 15: BRANDING & LOGO AUDIT**
+- **SIGNATURE**: White pill badge ("Capture reviews with Feedspace" + ⚡).
+- **LOCATION**: Bottom center/right of widget (Exceptions: Toast/Cross - Popup only).
+
+**RULE 16: TEXT CORRUPTION & STUTTERING**
+- **DEFECT**: Duplicated labels (e.g., "ReviewsReviews").
+- **FAIL**: If any label is layered on top of itself.
 
 ============================================================
 🚨 FEATURE-SPECIFIC AUDITS (IRON LOCK) 🚨
@@ -319,14 +397,6 @@ ${isMultiImage ? `
 **RULE 13: SOCIAL PLATFORM ICON (ANY ICON/COLOR)**
 - **PASS CRITERIA**: If a platform icon or brand logo is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
 - **SIGNATURES**: Logos (Google, Fresha) or small circular/square brand icons in the top-right corner. Any color is valid.
-
-**RULE 14: DATE VALIDATION (ANY-CARD PRINCIPLE)**
-- **PASS CRITERIA**: If a formatted date (e.g., "Feb 10, 2026") is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
-- **FORMAT**: Must match "Month DD, YYYY" or similar.
-- **STRICT PASS/FAIL**:
-    - **PASS**: If date matches "Month DD, YYYY" (3-letter month or full month name, plus day, comma, and year).
-    - **FAIL**: If format is slightly off (e.g., missing comma, "DD-MM-YYYY", or "2026-04-07").
-- **RELIABILITY LOCK**: If you find a date string in your audit, identify its format. If it matches the gold standard, you are PROHIBITED from flagging it as FAIL.
 `;
 
     // ============================================================
@@ -429,10 +499,25 @@ Q6. **BOTTOM SQUEEZE**: Proportional gutter check (>15% total height)? → [BREA
 Q7. **LAST WORD TEST**: Quote the last 3 words of the review in the card: → [WORDS / "ACTUAL_SQUEEZE_DETECTED"]
 Q8. **HORIZONTAL SYMMETRY**: Is the left padding significantly different (>2x) than the right padding? → [SYMMETRICAL / ASYMMETRIC-FAIL]
 
+Q9. **DESCENDER AUDIT (RULE 19)**: Look at the last line of text. Are the "tails" of letters like **g, j, p, q, y** fully visible, or are they flat/missing? 
+    → [DESCENDERS_CLEAR / DESCENDERS_SLICED]
+
 **FAILURE TRIGGERS:**
 - Q1 "**ACTUAL_BAR_FAILURE**" → Apply RULE 11 → FAIL Category C (Content & Text Rendering)
-- Q2 FLAT-WALL → Apply RULE 7 → FAIL Category G
+- Q2 FLAT-WALL → Apply RULE 7 → FAIL Category G (Popups & Modals)
 - Q5 VOID-FAILURE → FAIL Category A
+- Q9 PERIMETER_AUDIT (RULE 19 Gutter Scan) → [GUTTER_CLEAR / SQUEEZED-FAIL]
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.
+
+**RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
+- **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
+- **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
+- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully), the final status MUST be **FAIL**.
+**RULE 22: THE OVERFLOW & RESILIENCY AUDIT**
+- **VERTICAL SYMMETRY**: Compare the whitespace at the TOP of the card to the whitespace at the BOTTOM.
+- **NON-RESILIENT FAIL**: If the top padding is large (e.g. 30px) but the bottom padding is < 4px (causing content to hit the edge), the layout is **SHATTERED**.
+- **TRIGGER**: FAIL Category A using token **FAIL_LAYOUT_SHATTERED**.
+- **AVATAR ALIGNMENT**: For Avatar Group, the Avatar circle must NOT overlap the vertical space of the Review Body. If it sits too close to the text baseline, trigger **FAIL_CONTAINMENT_COLLISION**.
 - Apply RULE 1 (Sharpness) to avatars`,
 
       AVATAR_CAROUSEL: `
@@ -569,7 +654,10 @@ Q3. Text touching left/right card edges? → [NO / YES—TOUCHING]
 Q4. Excessive inset (huge empty margin before content)? → [NO / YES—EXCESSIVE]
 Q5. Avatar overflowing circular boundary? → [NO / YES]
 
-- **NAME/ROLE TRUNCATION (RULE 3 - IRON LOCK)**:
+**C. CONTENT & TEXT RENDERING**
+- Apply RULE 3 (Truncation), RULE 4 (Ghost Cards), and RULE 16 (Stuttering)
+Q1. Any text rendered as "invisible" (white-on-white) or ghosted? → [NO / GHOST-FAIL]
+Q2. **NAME/ROLE TRUNCATION (RULE 3 - IRON LOCK)**:
     - Look ONLY at the first line of NAME and JOB ROLE.
     - Does it end in "..." or an abrupt fade? → [FAIL / PASS]
     - **REVIEW BODY**: Elipsis here is **PASS**.
@@ -579,21 +667,25 @@ Q3. **READ MORE AUDIT**: Apply RULE 5—literal words "Read More" present?
     - **PASS CRITERIA**: If "Read More" is visible on **ANY** card in the widget, report UI Status: **Visible** and Verdict: **PASS**.
     - **ELLIPSIS**: "..." alone on some cards is acceptable if "Read More" text is present elsewhere.
     - Quote its text and color: → ["[Color] Read More" / "ABSENT"]
-Q4. **DATE AUDIT**: Grey date text visible? Quote format: → ["[Month DD, YYYY]" / "ABSENT"]
+Q4. **DATE AUDIT**: Grey date text visible? Apply RULE 14.
 
-- **MANDATORY REVIEWER AUDIT LOG (PER-CARD ANALYSIS)**:
+**D. AVATAR RENDERING**
+- Apply RULE 1 (Sharpness), RULE 9 (Identifiers), and RULE 11 (Skeletons)
+Q1. **SKELETON CHECK**: Are avatars rendered as vibrating gray circles or blocks?
+    - If YES, look up Section 0 ID. If rating is null → [SKELETON_PASS_FORCE].
+    - If NO → [ACTUAL AVATARS].
+Q2. Any photo looks distorted or has muddy edges? → [NO / YES—specify card]
+Q3. **MANDATORY REVIEWER AUDIT LOG (PER-CARD ANALYSIS)**:
     - You MUST list every unique name found and their sharpness/truncation status.
     - Format: "[Name]: [Initial/Photo] Sharpness Log (Text 1px/Img Xpx) | Truncation (FAIL/PASS)"
-    - **CRITICAL**: Apply Rule 1 (>1.1px = FAIL) to EVERY name listed.
-Q5. Avatar sizes consistent across cards? → [CONSISTENT / INCONSISTENT]
+    - **CRITICAL**: Apply Rule 1 (>1.1px = FAIL) to EVERY name listed. If failing, use token **FAIL_SHARP_AVATAR**.
+Q4. Avatar sizes consistent across cards? → [CONSISTENT / INCONSISTENT]
 
-**E. MEDIA & IMAGES**
-- Apply RULE 1 (Sharpness Benchmark) and RULE 9 (Identifiers)
-Q1. Broken image icons or gray placeholder boxes? → [NO / YES—specify card]
-Q2. Photos/logos stretched/squished (funhouse mirror)? → [NO / YES—describe]
 Q3. **SHARPNESS BENCHMARK (MANDATORY)**: 
-    - Perform the **CATWALK COMPARISON**: Image A (Keith) vs Image B (Polar Bear).
-    - Image soft/grainy/smeared compared to sharp text or adjacent cards? → [Passing - SHARP / Failing - BLURRY-FAIL]
+    - Apply the **ADAPTIVE RESOLUTION LOCK** (Rule 1).
+    - Compare logo/media image to current page text.
+    - **FORENSIC PROOF**: You are FORBIDDEN from reporting 'SHARP' unless you can describe the texture: (e.g., 'I can see 1px razor edges on the logo grain' or 'Text anti-aliasing is crisp').
+    - Does image show interpolation blur or 'Watercolor/Cloud' effect compared to text? → [Passing - SHARP / Failing - **FAIL_SHARP_MEDIA**]
     - **If no images**: → "Passing - SHARP (N/A)"
 Q4. All media fully visible within container? → [FULLY VISIBLE / PARTIALLY HIDDEN]
 
@@ -636,9 +728,6 @@ Q6. **INTERNAL GAPS**: Are sections (Avatar, Name, Body, Date) logically spaced?
 - Q5 CRIMPED → FAIL (MEDIUM)
 `;
 
-    // ============================================================
-    // WIDGET-SPECIFIC SCANNING RULES (Consolidated)
-    // ============================================================
     const widgetScanningRules = `
 ============================================================
 WIDGET-SPECIFIC FEATURE DETECTION RULES
@@ -653,8 +742,10 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 
 **AVATAR_CAROUSEL:**
 - Analyze BOTH avatar row AND expanded popup
+- **Show Social Platform Icon**: Apply RULE 13 (TOP RIGHT of popup)
+- **Show Review Ratings**: Apply RULE 12 (Log BOTH Row and popup)
 - **Left & Right Shift Buttons**: Circular arrows (← →) at absolute bottom of widget
-- **Show Review Date**: Inside popup—MUST quote exact "Month DD, YYYY" format
+- **Show Review Date**: Inside popup—Apply RULE 14
 - **Inline CTA**: Styled button (often with ↗) inside popup
 - **ANTI-CHEAT**: Do NOT invent relative dates like "5 months ago"
 
@@ -677,6 +768,8 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 
 **FLOATING_TOAST:**
 - Small preview + large expanded modal
+**TRUNCATION AUDIT (RULE 19)**: The Expanded Modal MUST show its full bottom shadow/border. If the text ends abruptly at the screenshot edge → **FAIL Category A (Layout)**.
+- **ASPECT RATIO CHECK**: A Floating Toast modal is a vertical/square portrait. If it looks like a narrow horizontal sliver → **FAIL (Clipped/Truncated)**.
 - **Show Social Platform Icon**: Apply RULE 13
 - **Show Review Ratings**: Apply RULE 12
 - **Expanded modal**: Check Read More, Date (RULE 14), Inline CTA
@@ -701,7 +794,7 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
   2. **GEOMETRY TRAP**: A single black diagonal strip is NOT an "X". If all reviews follow the same slope (e.g., all are \), it is a SINGLE SLIDER, not a Cross Bar.
   3. **INVENTORY VERDICT**: If your pre-analysis Q2 shows a static track or Q3 shows a straight line → Result: ABSENT.
 - **[Element: Tilted Cross Slider] Alignment**: The intentional tilt is **CORRECT**.
-- **Show Review Date**: Inside popup—strict "Month DD, YYYY"
+- **Show Review Date**: Inside popup—Apply RULE 14
 - **Inline CTA**: Inside popup—button/link (arrow ↗ NOT required)
 - **IMPORTANT**: Minority anti-aliasing on the diagonals is NORMAL. Only mark "Absent" if text is completely unreadable.
 
@@ -711,7 +804,7 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - **GRAY MODE**: If logos are grayscale while reference is vibrant → mark "Displays Gray mode" Visible
 - **EXPANSION AUDIT (CRITICAL)**: Look at the white card (popup) that appears after clicking a logo.
 - **DATE SCAN**: Scan the area BELOW the reviewer's stars/name and ABOVE the 'Capture reviews with Feedspace' footer.
-- **LITERAL DATE**: Look for "Month DD, YYYY" (e.g., "October 16, 2024"). If you see it, you MUST report "Visible" for "Show Review Date".
+- **LITERAL DATE**: Look for "Month DD, YYYY" (e.g., "October 16, 2024"). If you see it, you MUST report "Visible" for "Show Review Date" (Apply RULE 14).
 - **SINGLE-HIT RULE**: Verify if a date is present in any 'partX' screenshot showing an expansion.
 - **Popup**: White card over logo strip—scan for date below media, above CTA
 
@@ -743,9 +836,6 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - **Inline CTA**: Scan for distinct non-review cards with a large primary-colored button (e.g., "Get Started" or "Join Now").
 `;
 
-    // ============================================================
-    // FINAL VALIDATION CHECKLIST
-    // ============================================================
     const finalChecks = `
 ============================================================
 FINAL VALIDATION CHECKLIST (Before Writing JSON)
@@ -761,7 +851,9 @@ FINAL VALIDATION CHECKLIST (Before Writing JSON)
 ☑ Included [Card: Name] identifier in EVERY failure (RULE 9)
 ☑ Applied "SHARP_PASS_FORCE" if no images present
 ☑ Verified "Read More" per RULE 5 (literal text, not just "...")
-☑ Checked date format: strict "Month DD, YYYY" where required
+☑ Checked date format: strict "Month DD, YYYY" per RULE 14
+☑ Verified Feedspace Branding visibility and positioning per RULE 15
+
 ☑ Applied edge integrity checks (RULE 2) to all cards
 ☑ Applied 2-Line Rule (RULE 3) to truncated text
 ☑ Applied Ghost Card detection (RULE 4) to all text
@@ -772,9 +864,6 @@ FINAL VALIDATION CHECKLIST (Before Writing JSON)
 - Did I provide specific evidence for EVERY "Visible" claim? → [NO = FAIL / YES = PROCEED]
 `;
 
-    // ============================================================
-    // REPORTING LOGIC
-    // ============================================================
     const reportingLogic = `
 ============================================================
 REPORTING LOGIC & JSON OUTPUT
@@ -818,9 +907,6 @@ If you see it in pixels → report "Visible" and flag as FAIL
 - NO generic "The image" or "The text" without context
 `;
 
-    // ============================================================
-    // FINAL PROMPT ASSEMBLY
-    // ============================================================
     return `
 ${automationFeedback}
 ${coreRules}

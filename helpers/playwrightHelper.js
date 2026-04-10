@@ -378,17 +378,23 @@ class PlaywrightHelper {
                         if (!visited.has(el)) {
                             visited.add(el);
 
+                            // Visibility Check (Native DOM)
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            const isVisibleOnUI = (
+                                rect.width > 1 &&
+                                rect.height > 1 &&
+                                style.display !== 'none' &&
+                                style.visibility !== 'hidden' &&
+                                style.opacity !== '0'
+                            );
+
                             const hasStars = el.querySelector('.fs-rating-star, .fas.fa-star, .far.fa-star, [class*="star"], .fs-stars-wrapper, svg[class*="star"], [class*="rating-star"], [class*="star-icon"]');
                             const hasNumericalRating = Array.from(el.querySelectorAll('div, span, b')).some(el => {
                                 const text = el.innerText.trim();
                                 return /^\d+(\.\d+)?$/.test(text) && parseFloat(text) > 0 && parseFloat(text) <= 10;
                             });
                             const isRatingFound = hasStars || hasNumericalRating;
-                            const statusDetail = hasStars ? "STARS" : (hasNumericalRating ? "NUMERICAL" : "NONE");
-                            
-                            if (isRatingFound) {
-                                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings Found (${statusDetail})`);
-                            }
 
                             // Ensure element has a way to be identified in the main loop
                             let id = el.id || el.getAttribute('unique_widget_id') ||
@@ -405,7 +411,9 @@ class PlaywrightHelper {
                             results.push({
                                 className: el.className,
                                 id: id,
-                                isTemp: isTemp
+                                isTemp: isTemp,
+                                isVisible: isVisibleOnUI,
+                                isPrimary: el.classList.contains('feedspace-embed-main')
                             });
                         }
                     });
@@ -417,7 +425,15 @@ class PlaywrightHelper {
                 return results;
             }, SELECTOR_STRING);
 
+            // Sort candidates: Primary selectors (.feedspace-embed-main) and then Visible ones first
+            candidatesFound.sort((a, b) => {
+                if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+                if (a.isVisible !== b.isVisible) return a.isVisible ? -1 : 1;
+                return 0;
+            });
+
             let detectedType = 'Unknown';
+            let bestHiddenLocator = null;
 
             for (const cInfo of candidatesFound) {
                 const selector = cInfo.isTemp
@@ -429,38 +445,56 @@ class PlaywrightHelper {
                 if (candLocator) {
                     const discovered = await WidgetDetector.discover(candLocator, this.networkWidgetMap);
                     if (discovered !== 'Unknown') {
-                        if (WidgetDetector.isSameType(discovered, this.expectedType)) {
-                            locator = candLocator;
-                            detectedType = discovered;
-                            break;
+                        const isMatch = WidgetDetector.isSameType(discovered, this.expectedType);
+                        if (isMatch) {
+                            if (cInfo.isVisible) {
+                                locator = candLocator;
+                                detectedType = discovered;
+                                break; // High-priority visible match found
+                            } else if (!bestHiddenLocator) {
+                                bestHiddenLocator = candLocator;
+                                detectedType = discovered;
+                            }
                         }
                     }
                 }
             }
 
             // ── STEP 3: Verification ────────────────────────────────────────
-            if (!locator) {
-                console.warn(`[PlaywrightHelper] ⚠️  No locator found for expected type: ${this.expectedType}`);
-            }
-
-            // ── STEP 4: Type matching — network is source of truth ────────────
-            //
-            // FIX: Use isSameType() instead of Set.has() for the network match check.
-            // This handles backend/frontend alias equivalence — e.g. if the network
-            // returns MARQUEE_STRIPE but expectedType is STRIP_SLIDER, that is a match.
+            // If we found a locator but it's hidden, and we have a network match, report the failure.
             let isNetworkMatched = this._networkHasType(this.expectedType);
 
             if (!isNetworkMatched) {
                 console.log(`[PlaywrightHelper] ${this.expectedType} not seen yet in network — polling for up to 15s...`);
-                for (let i = 0; i < 30; i++) { // 30 * 500ms = 15s
+                for (let i = 0; i < 30; i++) {
                     await this._sleep(500);
                     isNetworkMatched = this._networkHasType(this.expectedType);
-                    if (isNetworkMatched) {
-                        console.log(`[PlaywrightHelper] 📡 Network hit detected for ${this.expectedType} during polling.`);
-                        break;
-                    }
+                    if (isNetworkMatched) break;
                 }
             }
+
+            // FINAL DIAGNOSTIC: Check if it's found in network but hidden in UI
+            if (isNetworkMatched && (!locator && bestHiddenLocator)) {
+                console.warn(`[PlaywrightHelper] 🚨 Container Detection Failure: Network Intercept matched ${this.expectedType} but the container is HIDDEN.`);
+                this.widgetType = this.expectedType;
+                this.typeMatchResult = {
+                    expected: this.expectedType,
+                    detected: this.expectedType,
+                    matched: false, // Explicitly marked as NOT matched for reporting
+                    reason: `Network intercepted widget ${this.expectedType} but it could not be identified on the UI. The container is likely hidden (display: none) or missing from the rendered DOM.`
+                };
+
+                if (!this.page.isClosed()) {
+                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
+                }
+                return this._finalizeAnalysis(screenshotBuffers, this.staticFeatures);
+            }
+
+            if (!locator && !isNetworkMatched) {
+                console.warn(`[PlaywrightHelper] ⚠️  No locator or network match found for: ${this.expectedType}`);
+            }
+
+            // --- Continue with normal flow if visible match was found ---
 
             // Final type resolution
             const isDomMatched = detectedType !== 'Unknown' && WidgetDetector.isSameType(detectedType, this.expectedType);
@@ -595,10 +629,11 @@ class PlaywrightHelper {
                     console.warn(`[PlaywrightHelper] Widget locator reached but height is still 0 after 10s.`);
                 }
 
-                await locator.scrollIntoViewIfNeeded().catch(() => { });
-                await this._sleep(1000);
+                // Header-Aware Scrolling: Ensures the widget isn't hidden by sticky nav bars
+                await this._scrollToWidget(locator);
+                await this._sleep(1500); 
             }
-            await this._sleep(1000);
+            await this._sleep(500);
 
             // ── STEP 5.5: Pagination Handling moved after context resolution to support iframes
 
@@ -607,7 +642,7 @@ class PlaywrightHelper {
             const domTruth = await locator.evaluate(el => {
                 const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
                 const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars'];
-                
+
                 const findDeep = (root, selectors) => {
                     for (const sel of selectors) {
                         if (root.querySelector(sel)) return true;
@@ -621,7 +656,7 @@ class PlaywrightHelper {
 
                 const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
                 const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
-                
+
                 return { iconsFound, starsFound };
             }).catch(() => ({ iconsFound: false, starsFound: false }));
 
@@ -729,12 +764,20 @@ class PlaywrightHelper {
             }
 
             // ── STEP 8: Viewport-context screenshot for AI ───────────────────
-            // CRITICAL: We use fullPage: false so that the AI sees exactly what a human sees.
-            // If a popup is truncated at the bottom of the screen, it MUST be truncated in the image.
+            // CRITICAL: We use fullPage: false by default to catch truncation.
+            // However, for MASONRY (Wall of Love), we add a fullPage: true shot to see the whole wall.
             if (!this.page.isClosed()) {
-                const contextShot = await this.page.screenshot({ fullPage: false, animations: 'disabled' });
-                if (contextShot) {
-                    screenshotBuffers.push(contextShot);
+                const isWall = (normalizedType === 'MASONRY' || normalizedType === 'GRID');
+                
+                // Final Viewport Shot (Catch truncation)
+                const viewportShot = await this.page.screenshot({ fullPage: false, animations: 'disabled' });
+                if (viewportShot) screenshotBuffers.push(viewportShot);
+
+                // Full Page Shot (Context for long widgets)
+                if (isWall) {
+                    console.log('[PlaywrightHelper] Capturing Full Page shot for Wall of Love context.');
+                    const fullShot = await this.page.screenshot({ fullPage: true, animations: 'disabled' }).catch(() => null);
+                    if (fullShot) screenshotBuffers.push(fullShot);
                 }
             }
 
@@ -945,9 +988,9 @@ class PlaywrightHelper {
 
                 clickCount++;
                 console.warn(`[PlaywrightHelper] 🔄 Clicking "Load More" (${clickCount}/${maxClicks})...`);
-                
+
                 // Force scroll to button before clicking to maintain human visibility
-                await button.scrollIntoViewIfNeeded().catch(() => {});
+                await button.scrollIntoViewIfNeeded().catch(() => { });
                 await button.click({ force: true, timeout: 5000 }).catch(async () => {
                     await button.evaluate(el => el.click());
                 });
@@ -959,7 +1002,7 @@ class PlaywrightHelper {
                 if (clickCount === 1 || clickCount === 4) {
                     console.log(`[PlaywrightHelper] Storyboard: Capturing View ${clickCount === 1 ? '2' : '3'}...`);
                     // Smart scroll: Ensure we see the NEWLY loaded area
-                    await context.evaluate(() => window.scrollBy(0, 400)).catch(() => {}); 
+                    await context.evaluate(() => window.scrollBy(0, 400)).catch(() => { });
                     const shot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
                     if (shot) screenshotBuffers.push(shot);
                 }
@@ -978,6 +1021,41 @@ class PlaywrightHelper {
         }
 
         console.log(`[PlaywrightHelper] ✅ Storyboard sequence complete with ${screenshotBuffers.length} images.`);
+    }
+
+    /**
+     * Header-Aware scroll to ensure widget is visible and not covered by sticky headers.
+     */
+    async _scrollToWidget(locator) {
+        if (!locator) return;
+        try {
+            await locator.evaluate((el) => {
+                // 1. Calculate Header Height
+                const headerHeight = Array.from(document.querySelectorAll('*'))
+                    .filter(node => {
+                        const style = window.getComputedStyle(node);
+                        return (style.position === 'fixed' || style.position === 'sticky') && 
+                               parseFloat(style.top) === 0 && 
+                               node.offsetHeight > 10 && 
+                               node.offsetHeight < 300; // Filter out full-page overlays
+                    })
+                    .reduce((max, node) => Math.max(max, node.offsetHeight), 0);
+
+                // 2. Scroll with Offset
+                const rect = el.getBoundingClientRect();
+                const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+                const targetY = currentScroll + rect.top - (headerHeight + 50); // 50px extra breathing room
+                
+                window.scrollTo({
+                    top: Math.max(0, targetY),
+                    behavior: 'auto' // Instant scroll to avoid capture lag
+                });
+            });
+            console.log('[PlaywrightHelper] Header-aware scroll complete.');
+        } catch (e) {
+            console.warn('[PlaywrightHelper] Custom scroll failed, falling back:', e.message);
+            await locator.scrollIntoViewIfNeeded().catch(() => {});
+        }
     }
 
     _sleep(ms) {
