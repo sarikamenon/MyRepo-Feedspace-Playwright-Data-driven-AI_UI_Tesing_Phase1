@@ -189,31 +189,66 @@ class AIEngine {
         );
 
         // ── findAdmission: Scan answer-part of each reasoning line for defect keywords ──
+        // ── findAdmission: Scan answer-part for defect keywords with Negation Guard ──
         const findAdmission = (keys) => {
             const bluntFailures = [
                 "blurry-fail", "blurred-fail", "fuzzy-fail", "sharp-fail", "blur-fail", "fail-blur",
                 "loss-of-sharpness", "missing-elements", "clipped-fail", "sliced-fail",
-                "json-leakage", "raw-code", "json-leak", "blured"
+                "json-leakage", "raw-code", "json-leak", "muddy"
             ];
-            const allKeys = [...keys, ...bluntFailures];
+            
+            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing"]; 
 
             for (const line of reasoningLines) {
-                const lowLine = line.toLowerCase().trim();
-                if (!lowLine) continue;
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
 
                 // Split on separator and take only the answer part
-                let answerPart = lowLine;
+                let answerPart = trimmedLine;
                 const separators = ['→', '->', ':'];
                 for (const sep of separators) {
-                    if (lowLine.includes(sep)) {
-                        const parts = lowLine.split(sep);
+                    if (trimmedLine.includes(sep)) {
+                        const parts = trimmedLine.split(sep);
                         answerPart = parts[parts.length - 1].trim();
                         break;
                     }
                 }
 
-                if (allKeys.some(k => answerPart.includes(k.toLowerCase()))) {
-                    return line; // Return the full original line for identifier extraction
+                const lowAnswer = answerPart.toLowerCase();
+
+                // 1. Check for Strict Tokens (Prioritize Case-Sensitive or Strict Match)
+                for (const key of keys) {
+                    if (key.startsWith("FAIL_") || key.startsWith("CRITICAL_") || key.startsWith("ICON_")) {
+                        // Strict tokens must be present and NOT preceded by a negation
+                        if (answerPart.includes(key)) {
+                            const beforeToken = answerPart.split(key)[0].toLowerCase();
+                            if (!negations.some(neg => beforeToken.includes(neg))) {
+                                return line;
+                            }
+                        }
+                    } else {
+                        // 2. Check for Fuzzy Keywords (Case Insensitive, No Negation)
+                        if (lowAnswer.includes(key.toLowerCase())) {
+                            // IGNORE lines that are clearly questions or prompt markers
+                            if (line.trim().startsWith("* Q") || line.trim().startsWith("Q") || line.toLowerCase().endsWith("? no") || line.toLowerCase().endsWith("no.")) {
+                                continue;
+                            }
+                            const beforeKeyword = lowAnswer.split(key.toLowerCase())[0];
+                            if (!negations.some(neg => beforeKeyword.includes(neg))) {
+                                return line;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Check for Blunt Failures (Case Insensitive, No Negation)
+                for (const blunt of bluntFailures) {
+                    if (lowAnswer.includes(blunt.toLowerCase())) {
+                        const beforeBlunt = lowAnswer.split(blunt.toLowerCase())[0];
+                        if (!negations.some(neg => beforeBlunt.includes(neg))) {
+                            return line;
+                        }
+                    }
                 }
             }
             return null;
@@ -225,50 +260,105 @@ class AIEngine {
             return match ? ` on ${match[0]}` : " in widget";
         };
 
-        // ── LAYOUT: anchor strings + findAdmission fallback ──
-        const layoutLine = findAdmission(["flat-wall fail", "narrow-clipped", "critical_layout_failure"]);
+        const friendlyErrorMap = {
+            "DESCENDERS_SLICED": "Review text is horizontally clipped/bisected at the bottom boundary (Text Truncation).",
+            "Q9": "Review text is horizontally clipped/bisected at the bottom boundary (Text Truncation).",
+            "FLAT-WALL": "Container has a sharp, rectilinear cut instead of a rounded border (Clipping Detected).",
+            "Q2": "Container has a sharp, rectilinear cut instead of a rounded border (Clipping Detected).",
+            "CHOPPED": "Card corners are asymmetric; detected a sharp 90° cut vs. a rounded edge.",
+            "ASYMMETRIC": "Layout corners are asymmetric (Uneven rounding/padding detected).",
+            "SQUEEZED-FAIL": "Ratings or text are touching the container edge (Gutter failure detected).",
+            "FAIL_CONTAINMENT_COLLISION": "Content collision detected (Text or stars overlapping other elements).",
+            "FAIL_LAYOUT_CLIPPED": "Widget content is bleeding off the screen or container boundary.",
+            "FAIL_TEXT_TRUNCATED": "Text is cut off mid-sentence or lacks vertical clearance (Squeeze Failure).",
+            "FAIL_LAYOUT_SHATTERED": "Layout is non-resilient; content is squeezing out of the container boundary (Padding Mismatch).",
+            "FAIL_DATE_FORMAT": "Review date format is incorrect (Missing Day/Month/Year components).",
+            "FAIL_DATE_RULE14": "Review date format is incorrect; must strictly follow Month DD, YYYY (e.g., Oct 17, 2025).",
+            "missing bottom edge": "Widget container is clipped; the bottom border/edge is missing or bleeding off.",
+            "kn...": "Text truncation detected (Incomplete word 'know' rendered as 'kn...').",
+            "needed to kn...": "Text truncation detected (Incomplete word 'know' rendered as 'kn...').",
+            "ended in dots": "Text ends prematurely with an ellipsis in a modal/popup.",
+            "no bottom border": "Container bottom boundary is not visible (Possible Horizontal Clipping).",
+            "borderless state": "Container bottom edge is missing/borderless (Clipping detected).",
+            "bottom part is cut": "The bottom of the widget is visually truncated or cut off.",
+            "corners are not visible": "Widget perimeter is compromised; border corners are missing/clipped."
+        };
+
+        const toFriendlyError = (line, defaultValue) => {
+            if (!line) return defaultValue;
+            for (const [key, friendly] of Object.entries(friendlyErrorMap)) {
+                if (line.includes(key)) return friendly;
+            }
+            return line.split('→').pop().split('->').pop().trim() || defaultValue;
+        };
+
+        // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
+        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "truncated", "cut off", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "bottom part is cut", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out"];
+        const layoutLine = findAdmission(layoutKeywords);
         const mentionsLayoutIssue = (
-            analysisMessage.includes("CRITICAL_LAYOUT_FAILURE") ||
-            analysisMessage.includes("FLAT-WALL FAIL") ||
-            analysisMessage.includes("NARROW-CLIPPED") ||
+            analysisMessage.includes("FAIL_LAYOUT_CLIPPED") ||
+            analysisMessage.includes("FAIL_LAYOUT_ASYMMETRIC") ||
+            analysisMessage.includes("ASYMMETRIC") ||
+            analysisMessage.includes("SYMMETRY") ||
             layoutLine
-        ) && !analysisMessage.includes("LAYOUT_PASS_FORCE");
+        ) && !analysisMessage.includes("PASS_FORCE_LAYOUT");
+
+        const mentionsBlockageIssue = (
+            analysisMessage.includes("FAIL_LAYOUT_BLOCKED") ||
+            analysisMessage.includes("FAIL_POPUP_BLOCK") ||
+            analysisMessage.includes("WIDGET_NOT_FOUND")
+        );
 
         const layoutProof = extractProof(layoutLine);
 
-        // ── SHARPNESS: direct anchor strings take priority over findAdmission ──
-        const blurLine = findAdmission([
-            "blurry", "blur", "pixelated", "soft", "fuzzy", "loss of detail",
-            "low-res", "pixel blocks", "out of focus", "unclear detail",
-            "low resolution", "blurry edges", "loss of focus"
-        ]);
-        const mentionsSharpnessIssue = (
+        // ── SHARPNESS: Strict tokens + Fuzzy Keyword fallback ──
+        const blurKeywords = [
+            "slightly soft", "compressed image", "low-res", "fuzzy", "blur", 
+            "pixelated", "smeared", "watercolor", "muddy texture", "poor clarity",
+            "smooth texture", "clean appearance", "interpolation", "high-level smoothing",
+            "water-color", "cloud-like", "soft detail", "hybrid sharpness", "differential fail",
+            "softer than text"
+        ];
+        
+        const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", ...blurKeywords]);
+        const mediaBlurLine = findAdmission(["FAIL_SHARP_MEDIA", ...blurKeywords]);
+        
+        const mentionsAvatarSharpness = (
+            analysisMessage.includes("FAIL_SHARP_AVATAR") ||
             analysisMessage.includes("CRITICAL_AVATAR_FAILURE") ||
-            analysisMessage.includes("BLURRY-FAIL") ||
-            analysisMessage.includes("BLURRED-FAIL") ||
-            analysisMessage.includes("BLUR-FAIL") ||
-            analysisMessage.includes("FUZZY-FAIL") ||
-            analysisMessage.includes("SHARP-FAIL") ||
-            analysisMessage.includes("LOSS-OF-SHARPNESS") ||
-            analysisMessage.includes("Failing - BLURRY") ||
-            blurLine
-        ) && !analysisMessage.includes("SHARP_PASS_FORCE") && !isImageAbsent;
+            avatarBlurLine
+        ) && !analysisMessage.includes("PASS_FORCE_SHARP");
 
-        const sharpnessProof = extractProof(blurLine);
+        const mentionsMediaSharpness = (
+            analysisMessage.includes("FAIL_SHARP_MEDIA") ||
+            mediaBlurLine
+        ) && !analysisMessage.includes("PASS_FORCE_SHARP");
 
-        // ── CONTENT: anchor strings + findAdmission fallback ──
-        const contentLine = findAdmission([
-            "json leakage", "raw json", "placeholder token", "unrendered code",
-            "structural garbage", "curly brace", "premature truncation", "line-1-fail"
-        ]);
+        // ── CONTENT & CONTAINMENT ──
+        const contentLine = findAdmission(["FAIL_CONTENT_TRUNCATED", "FAIL_CONTENT_JSON_LEAK"]);
+        const containmentLine = findAdmission(["FAIL_CONTAINMENT_COLLISION", "FAIL_ELEMENT_OVERLAP", "collision", "blocking icon", "overlap"]);
+
         const mentionsContentIssue = (
-            analysisMessage.includes("CRITICAL_CONTENT_FAILURE") ||
-            analysisMessage.includes("JSON LEAK") ||
-            analysisMessage.includes("LINE-1-FAIL") ||
+            analysisMessage.includes("FAIL_CONTENT_TRUNCATED") ||
+            analysisMessage.includes("FAIL_CONTENT_JSON_LEAK") ||
             contentLine
-        ) && !analysisMessage.includes("CONTENT_PASS_FORCE");
+        ) && !analysisMessage.includes("PASS_FORCE_CONTENT");
 
-const contentProof = extractProof(contentLine);
+        const mentionsContainmentIssue = (
+            analysisMessage.includes("FAIL_CONTAINMENT_COLLISION") ||
+            analysisMessage.includes("FAIL_ELEMENT_OVERLAP") ||
+            containmentLine
+        );
+
+        // ── DATE: Strict tokens only ──
+        const dateLine = findAdmission(["FAIL_DATE_FORMAT", "FAIL_DATE_RULE14"]);
+        const mentionsDateIssue = (
+            analysisMessage.includes("FAIL_DATE_FORMAT") ||
+            analysisMessage.includes("FAIL_DATE_RULE14") ||
+            dateLine
+        );
+
+        const dateProof = extractProof(dateLine);
 
         // ── ICON: anchor strings + findAdmission fallback ──
         const iconLine = findAdmission(["icon violation", "erroneous visibility", "visible despite config", "logo-fail"]);
@@ -281,29 +371,46 @@ const contentProof = extractProof(contentLine);
         const iconProof = extractProof(iconLine);
 
         // ── Apply AUTO-FAIL overrides where reasoning contradicts JSON PASS ──
-        if (mentionsLayoutIssue || mentionsSharpnessIssue || mentionsContentIssue) {
+        if (mentionsLayoutIssue || mentionsAvatarSharpness || mentionsMediaSharpness || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
             (aiData.aesthetic_results || []).forEach(res => {
                 const cat = res.category.toUpperCase();
-                const isLayoutCat = cat.includes("LAYOUT") || cat.includes("POPUP") || cat.includes("SPACING");
-                const isSharpnessCat = cat.includes("AVATAR") || cat.includes("MEDIA");
-                const isContentCat = cat.includes("CONTENT") || cat.includes("TEXT");
-
+                
                 if (res.status === "PASS") {
-                    if (isLayoutCat && mentionsLayoutIssue) {
+                    if (mentionsBlockageIssue) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Layout issues (slicing or truncation) detected${layoutProof}. Overriding for safety.`;
+                        res.issue = `[Auto-Fail] Blockage: ${toFriendlyError(layoutLine, "Partially cut or obscured widget detected.")}`;
                         res.severity = "CRITICAL";
-                    } else if (isSharpnessCat && mentionsSharpnessIssue) {
+                    } else if (cat.includes("LAYOUT") && mentionsLayoutIssue) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Image quality issues (blur or fuzziness) detected${sharpnessProof}. Overriding for safety.`;
+                        res.issue = `[Auto-Fail] Layout: ${toFriendlyError(layoutLine, "Clipped edges or layout integrity failure.")}`;
                         res.severity = "CRITICAL";
-                    } else if (isContentCat && mentionsContentIssue) {
+                    } else if (cat.includes("AVATAR") && mentionsAvatarSharpness) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Review text contains unrendered code or technical markers${contentProof}. Overriding for safety.`;
+                        res.issue = `[Auto-Fail] Avatar Quality: ${toFriendlyError(avatarBlurLine, "Blur or interpolation detected in avatars.")}`;
                         res.severity = "CRITICAL";
-                    } else if (res.category.toUpperCase().includes("ICON") && mentionsIconIssue) {
+                    } else if (cat.includes("MEDIA") && mentionsMediaSharpness) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Social platform icon violation detected${iconProof}. Visible despite being OFF in config.`;
+                        res.issue = `[Auto-Fail] Media Quality: ${toFriendlyError(mediaBlurLine, "Blur or interpolation detected in logos/images.")}`;
+                        res.severity = "CRITICAL";
+                    } else if (cat.includes("CONTAINMENT") && mentionsContainmentIssue) {
+                        res.status = "FAIL";
+                        res.issue = `[Auto-Fail] Containment: ${toFriendlyError(containmentLine, "Element overlap or collision detected.")}`;
+                        res.severity = "CRITICAL";
+                    } else if (cat.includes("CONTENT") && mentionsContentIssue) {
+                        res.status = "FAIL";
+                        res.issue = `[Auto-Fail] Content: ${toFriendlyError(contentLine, "Truncation or JSON leak detected.")}`;
+                        res.severity = "CRITICAL";
+                    } else if (cat.includes("SPACING") && mentionsLayoutIssue) {
+                         res.status = "FAIL";
+                         res.issue = `[Auto-Fail] Spacing: ${toFriendlyError(layoutLine, "Layout spacing imbalance detected.")}`;
+                         res.severity = "CRITICAL";
+                    } else if ((cat.includes("TEXT") || cat.includes("CONTENT")) && mentionsDateIssue) {
+                        res.status = "FAIL";
+                        res.issue = `[Auto-Fail] Date Format: ${toFriendlyError(dateLine, "Rule 14 violation.")}`;
+                        res.severity = "CRITICAL";
+                    } else if (cat.includes("ICON") && mentionsIconIssue) {
+                        res.status = "FAIL";
+                        res.issue = `[Auto-Fail] Icon Visibility: ${iconLine || "Social icon visible despite being OFF in config."}`;
                         res.severity = "CRITICAL";
                     }
                 }

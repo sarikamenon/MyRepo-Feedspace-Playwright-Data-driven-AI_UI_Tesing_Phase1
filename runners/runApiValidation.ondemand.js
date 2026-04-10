@@ -127,7 +127,7 @@ async function run() {
 
     // Dynamic Viewport Extraction (Default: 1920x700 as per runValidation.js)
     const targetWidth = dataRoot.width ? parseInt(dataRoot.width) : 1920;
-    const targetHeight = dataRoot.height ? parseInt(dataRoot.height) : 700;
+    const targetHeight = dataRoot.height ? parseInt(dataRoot.height) : 1080;
     console.log(`[OnDemand] Target Viewport: ${targetWidth}x${targetHeight}`);
 
     const processedUrls = loadProcessedUrls();
