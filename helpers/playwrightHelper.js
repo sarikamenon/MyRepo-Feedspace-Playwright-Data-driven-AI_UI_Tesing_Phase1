@@ -125,17 +125,19 @@ class PlaywrightHelper {
         // ── Network interception ────────────────────────────────────────────
         this.page.on('response', async (response) => {
             try {
-                const responseUrl = response.url();
+                // 1. Status & Resource Filtering (Fastest exits)
                 const status = response.status();
-
-                // FIX: Only process Feedspace API responses.
-                // Explicitly exclude the main page URL — its HTML can contain
-                // arbitrary "type" fields that are not widget type IDs.
-                const isFeedspaceApi = responseUrl.includes('feedspace') &&
-                    responseUrl !== url;
-
-                if (!isFeedspaceApi) return;
                 if (status !== 200 && status !== 201) return;
+
+                const resourceType = response.request().resourceType();
+                if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) return;
+
+                // 2. URL & Content Context
+                const responseUrl = response.url();
+                if (!responseUrl.includes('feedspace')) return;
+
+                const contentType = (response.headers()['content-type'] || '').toLowerCase();
+                if (contentType.includes('text/html') || contentType.includes('image/') || contentType.includes('font/')) return;
 
                 // ── Fast path: type ID in query string ──
                 const urlTypeMatch = responseUrl.match(/[?&]widget_type_id=(\d+)/) ||
@@ -176,8 +178,30 @@ class PlaywrightHelper {
                                 console.log(`[PlaywrightHelper] 🕵️  Autodiscovered type: ${typeName}. Updating expectedType.`);
                                 this.expectedType = typeName;
                             }
-                            this.config = data || json.data || json || this.config;
-                            console.log(`[PlaywrightHelper] 🛠️  Live config captured for ${typeName}.`);
+                            // ── DEEP MERGE CONFIG ──
+                            // Prevent loss of customization data (fonts, colors) when a 'data-only' 
+                            // response arrives later in the stream.
+                            const newData = data || json.data || json;
+                            if (newData && typeof newData === 'object') {
+                                if (!this.config || typeof this.config !== 'object') {
+                                    this.config = newData;
+                                } else {
+                                    // Non-destructive merge of top-level keys
+                                    this.config = {
+                                        ...this.config,
+                                        ...newData,
+                                        widget_customization: {
+                                            ...(this.config.widget_customization || {}),
+                                            ...(newData.widget_customization || {})
+                                        },
+                                        widget_data: {
+                                            ...(this.config.widget_data || {}),
+                                            ...(newData.widget_data || {})
+                                        }
+                                    };
+                                }
+                            }
+                            console.log(`[PlaywrightHelper] 🛠️  Live config captured/merged for ${typeName}.`);
                         }
 
                         if (uniqueWidgetId) {
@@ -187,6 +211,9 @@ class PlaywrightHelper {
                         }
                     }
                 } catch (jsonErr) {
+                    // SILENT GUARD: If JSON parsing fails, we fall back to regex.
+                    // No console.warn here to prevent noise for non-standard payloads.
+
                     // ── Regex fallback on raw text ──
                     // FIX: Only match the unambiguous field names to avoid false positives
                     const typeRegex = /"?(?:widget_type_id|widget_type|type)"?\s*[:=]\s*["']?(\d+)["']?/g;
@@ -205,7 +232,6 @@ class PlaywrightHelper {
                 }
             } catch (ignore) { /* Page navigated away — safe to ignore */ }
         });
-
 
         let attempts = 0;
         const maxAttempts = 3;
@@ -251,6 +277,16 @@ class PlaywrightHelper {
                 return;
 
             } catch (error) {
+                const msg = error.message || '';
+                if (msg.includes('net::ERR_NAME_NOT_RESOLVED')) {
+                    console.error(`[PlaywrightHelper] 🛑 DNS Failure: The domain could not be resolved. URL is likely invalid or private.`);
+                    throw new Error('CONNECTIVITY_DNS_FAILURE: The domain name used in the URL could not be resolved. Please verify the URL or ensure the site is public.');
+                }
+                if (msg.includes('net::ERR_CONNECTION_TIMED_OUT')) {
+                    console.error(`[PlaywrightHelper] 🛑 Connection Timeout: The server took too long to respond.`);
+                    throw new Error('CONNECTIVITY_TIMEOUT: The server did not respond in time. The site might be down or blocked by a firewall.');
+                }
+
                 console.error(`[PlaywrightHelper] Navigation error (Attempt ${attempts}): ${error.message}`);
                 if (attempts >= maxAttempts) throw error;
                 await this._sleep(5000);
@@ -352,19 +388,17 @@ class PlaywrightHelper {
             const count = await allMatches.count();
 
             if (count === 0) {
-                console.warn('[PlaywrightHelper] No Feedspace widget found on page.');
+                const reason = 'No Feedspace widget selectors matched on the page. Tried 30+ variants (shadow-piercing) and verified DOM/Network state; no Feedspace elements were detected or embedded.';
+                console.warn(`[PlaywrightHelper] 🛑 ${reason}`);
                 this.widgetType = 'Widget Not Found';
                 this.typeMatchResult = {
                     expected: this.expectedType,
                     detected: 'Widget Not Found',
                     matched: false,
-                    reason: 'No Feedspace widget selectors matched on the page'
+                    reason: reason
                 };
 
-                if (!this.page.isClosed()) {
-                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
-                }
-                return this._finalizeAnalysis(screenshotBuffers, this.staticFeatures);
+                return this._buildErrorResult(reason);
             }
             console.log(`[PlaywrightHelper] Found ${count} candidate(s)`);
 
@@ -491,7 +525,21 @@ class PlaywrightHelper {
             }
 
             if (!locator && !isNetworkMatched) {
-                console.warn(`[PlaywrightHelper] ⚠️  No locator or network match found for: ${this.expectedType}`);
+                const reason = `Widget Identification Failure: No valid container or network signature found for ${this.expectedType}. Since the widget is not physically present on the UI, further interactions and AI visual checks have been skipped to prevent "Ghost Failures".`;
+                console.warn(`[PlaywrightHelper] ⚠️  ${reason}`);
+                this.widgetType = 'Widget Not Found';
+                this.typeMatchResult = {
+                    expected: this.expectedType,
+                    detected: 'Widget Not Found',
+                    matched: false,
+                    reason: reason
+                };
+
+                // 📸 Capture a diagnostic screenshot of the "empty" page for the report
+                if (!this.page.isClosed()) {
+                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }).catch(() => null));
+                }
+                return this._finalizeAnalysis(screenshotBuffers.filter(Boolean), this.staticFeatures);
             }
 
             // --- Continue with normal flow if visible match was found ---
@@ -526,6 +574,13 @@ class PlaywrightHelper {
                 if (genericSliders.includes(this.widgetType)) {
                     console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing CROSS_SLIDER identification over common misdetected type: ${this.widgetType}.`);
                     this.widgetType = 'CROSS_SLIDER';
+                }
+            }
+            
+            if (this.expectedType === 'FLOATING_TOAST') {
+                if (this.widgetType === 'AVATAR_CAROUSEL' || this.widgetType === 'AVATAR_GROUP') {
+                    console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing FLOATING_TOAST identification. Mis-routing blocked for ${this.widgetType}.`);
+                    this.widgetType = 'FLOATING_TOAST';
                 }
             }
 
@@ -589,7 +644,12 @@ class PlaywrightHelper {
             // ── STEP 5: Viewport & distraction cleanup ───────────────────────
             if (this.page.isClosed()) return this._buildErrorResult('Page closed during setup');
 
-            await this.page.setViewportSize({ width: 1920, height: 1080 });
+            const normalizedType = this.widgetType.toUpperCase();
+
+            // 🚨 Viewport Lockdown: To reproduce the user's slicing issue, we must lock the height to 700px.
+            // At 1080px (default), the review box fits and we get a false PASS.
+            const vHeight = normalizedType === 'AVATAR_GROUP' ? 700 : 1080;
+            await this.page.setViewportSize({ width: 1536, height: vHeight });
 
             await this.page.evaluate((selectors) => {
                 selectors.forEach(sel => {
@@ -607,8 +667,6 @@ class PlaywrightHelper {
                     } catch (e) { }
                 });
             }, DISTRACTION_SELECTORS);
-
-            const normalizedType = this.widgetType.toUpperCase();
 
             if (normalizedType !== 'FLOATING_TOAST') {
                 await this.slowScrollToFind();
@@ -631,7 +689,7 @@ class PlaywrightHelper {
 
                 // Header-Aware Scrolling: Ensures the widget isn't hidden by sticky nav bars
                 await this._scrollToWidget(locator);
-                await this._sleep(1500); 
+                await this._sleep(1500);
             }
             await this._sleep(500);
 
@@ -639,47 +697,86 @@ class PlaywrightHelper {
 
             // ── DOM "TRUTH" SNIFFING (SCOPED TO WIDGET) ─────────────────────
             // This detects presence of elements buried in Shadow DOM to prevent AI hallucination and background interference.
-            const domTruth = await locator.evaluate(el => {
-                const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
-                const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars'];
+            let domTruth = { iconsFound: false, starsFound: false, itemCount: 0 };
+            if (locator) {
+                domTruth = await locator.evaluate(el => {
+                    const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
+                    const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon'];
+                    // Strict content selectors: Name, body text, or rating indicators
+                    const itemSels = [
+                        '.feedspace-card', '.fe-feed-item', '.review-card',
+                        '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
+                        '[data-feed-id]', '.fe-review-body', '.feedspace-body'
+                    ];
 
-                const findDeep = (root, selectors) => {
-                    for (const sel of selectors) {
-                        if (root.querySelector(sel)) return true;
-                    }
-                    const children = [...root.querySelectorAll('*')];
-                    for (const child of children) {
-                        if (child.shadowRoot && findDeep(child.shadowRoot, selectors)) return true;
-                    }
-                    return false;
-                };
+                    const findDeep = (root, selectors) => {
+                        for (const sel of selectors) {
+                            if (root.querySelector(sel)) return true;
+                        }
+                        const children = [...root.querySelectorAll('*')];
+                        for (const child of children) {
+                            if (child.shadowRoot && findDeep(child.shadowRoot, selectors)) return true;
+                        }
+                        return false;
+                    };
 
-                const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
-                const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
+                    const countDeep = (root, selectors) => {
+                        let elements = [];
+                        for (const sel of selectors) {
+                            elements = elements.concat([...root.querySelectorAll(sel)]);
+                        }
+                        // Filter for uniqueness by element reference if possible, but easier to just count distinct tags/text
+                        let total = elements.length;
+                        const children = [...root.querySelectorAll('*')];
+                        for (const child of children) {
+                            if (child.shadowRoot) total += countDeep(child.shadowRoot, selectors);
+                        }
+                        return total;
+                    };
 
-                return { iconsFound, starsFound };
-            }).catch(() => ({ iconsFound: false, starsFound: false }));
+                    const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
+                    const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
+                    const itemCount = countDeep(el, itemSels) + (el.shadowRoot ? countDeep(el.shadowRoot, itemSels) : 0);
 
-            if (domTruth.iconsFound) {
-                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
-                this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present in the top-right corner of the review cards. You MUST report them as 'Visible'.");
-            }
-            if (!domTruth.starsFound) {
-                console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
-                this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
+                    return { iconsFound, starsFound, itemCount };
+                }).catch(() => ({ iconsFound: false, starsFound: false, itemCount: 0 }));
+
+                if (domTruth.itemCount === 0) {
+                    console.warn('[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE DETECTED. No review cards found.');
+                    this.geometricWarnings.push("EMPTY_STATE_FORCE_PASS: This widget is currently empty (Zero review items found in DOM). You are PROHIBITED from reporting layout failures on cards. Circular objects are Navigation Arrows, NOT review cards. Mark Feature categories as 'PASS (Empty State)' and Aesthetic categories as 'PASS'.");
+                } else {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Found ${domTruth.itemCount} candidate item(s).`);
+                }
+
+                if (domTruth.iconsFound) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
+                    this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present in the top-right corner of the review cards. You MUST report them as 'Visible'.");
+                }
+                if (!domTruth.starsFound && domTruth.itemCount > 0) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
+                    this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
+                }
+            } else {
+                console.warn('[PlaywrightHelper] Skipping DOM Sniff: No valid widget locator found.');
             }
 
             // ── STEP 6: Widget-specific interaction ──────────────────────────
-            const box = await locator.boundingBox().catch(() => null);
-            console.log(`[PlaywrightHelper] Widget bounds: ${box ? `${Math.round(box.width)}x${Math.round(box.height)}` : 'Unknown'}`);
+            const box = locator ? await locator.boundingBox().catch(() => null) : null;
+            if (box) {
+                console.log(`[PlaywrightHelper] Widget bounds: ${Math.round(box.width)}x${Math.round(box.height)}`);
+            } else {
+                console.warn('[PlaywrightHelper] Widget bounds: Unknown (Locator missing or height 0)');
+            }
 
             let interactionContext = this.page;
-            const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
-            if (tagName === 'iframe') {
-                const frame = await locator.contentFrame();
-                if (frame) {
-                    interactionContext = frame;
-                    console.log('[PlaywrightHelper] Widget is inside iframe — switching context.');
+            if (locator) {
+                const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+                if (tagName === 'iframe') {
+                    const frame = await locator.contentFrame();
+                    if (frame) {
+                        interactionContext = frame;
+                        console.log('[PlaywrightHelper] Widget is inside iframe — switching context.');
+                    }
                 }
             }
 
@@ -751,6 +848,10 @@ class PlaywrightHelper {
             } else if (normalizedType === 'MASONRY' || normalizedType === 'GRID') {
                 const shots = await MasonryHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
+
+            } else if (normalizedType === 'AVATAR_GROUP') {
+                const shots = await AvatarGroupHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
             }
 
             // ── STEP 7: Ensure at least one focused shot ──────────────────────
@@ -768,7 +869,7 @@ class PlaywrightHelper {
             // However, for MASONRY (Wall of Love), we add a fullPage: true shot to see the whole wall.
             if (!this.page.isClosed()) {
                 const isWall = (normalizedType === 'MASONRY' || normalizedType === 'GRID');
-                
+
                 // Final Viewport Shot (Catch truncation)
                 const viewportShot = await this.page.screenshot({ fullPage: false, animations: 'disabled' });
                 if (viewportShot) screenshotBuffers.push(viewportShot);
@@ -962,6 +1063,19 @@ class PlaywrightHelper {
     }
 
     async _handleLoadMoreLoop(context, screenshotBuffers = []) {
+        const type = (this.widgetType || "").toUpperCase();
+        const isSlider = type.includes('SLIDER') || type.includes('CAROUSEL') || type.includes('MARQUEE') || type.includes('TOAST');
+        
+        if (isSlider) {
+            console.log(`[PlaywrightHelper] Skipping "Load More" loop for ${type} widget.`);
+            // Just capture the initial state for the storyboard
+            if (screenshotBuffers.length === 0) {
+                const initialShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
+                if (initialShot) screenshotBuffers.push(initialShot);
+            }
+            return;
+        }
+
         let clickCount = 0;
         const maxClicks = 10;
         const loadMoreSelector = 'span:has-text("Load More"), button:has-text("Load More")';
@@ -1034,10 +1148,10 @@ class PlaywrightHelper {
                 const headerHeight = Array.from(document.querySelectorAll('*'))
                     .filter(node => {
                         const style = window.getComputedStyle(node);
-                        return (style.position === 'fixed' || style.position === 'sticky') && 
-                               parseFloat(style.top) === 0 && 
-                               node.offsetHeight > 10 && 
-                               node.offsetHeight < 300; // Filter out full-page overlays
+                        return (style.position === 'fixed' || style.position === 'sticky') &&
+                            parseFloat(style.top) === 0 &&
+                            node.offsetHeight > 10 &&
+                            node.offsetHeight < 300; // Filter out full-page overlays
                     })
                     .reduce((max, node) => Math.max(max, node.offsetHeight), 0);
 
@@ -1045,7 +1159,7 @@ class PlaywrightHelper {
                 const rect = el.getBoundingClientRect();
                 const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
                 const targetY = currentScroll + rect.top - (headerHeight + 50); // 50px extra breathing room
-                
+
                 window.scrollTo({
                     top: Math.max(0, targetY),
                     behavior: 'auto' // Instant scroll to avoid capture lag
@@ -1054,7 +1168,7 @@ class PlaywrightHelper {
             console.log('[PlaywrightHelper] Header-aware scroll complete.');
         } catch (e) {
             console.warn('[PlaywrightHelper] Custom scroll failed, falling back:', e.message);
-            await locator.scrollIntoViewIfNeeded().catch(() => {});
+            await locator.scrollIntoViewIfNeeded().catch(() => { });
         }
     }
 

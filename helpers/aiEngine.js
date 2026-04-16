@@ -16,6 +16,23 @@ class AIEngine {
     }
 
     async analyzeScreenshot(imageBuffers, config, widgetType, staticFeatures, geometricWarnings) {
+        if (widgetType === 'Widget Not Found') {
+            console.log("[AIEngine] 🛑 Detection failure detected. Skipping AI and returning 'Not Found' result.");
+            return {
+                overall_status: "FAIL",
+                analysis_message: "No Feedspace widget was identified on the page. AI analysis skipped to provide a clean error reporting.",
+                feature_results: (staticFeatures || []).map(f => ({
+                    feature: typeof f === 'string' ? f : (f.name || 'Unknown'),
+                    ui_status: 'Absent',
+                    config_status: 'Absent',
+                    scenario: 'Widget Not Found',
+                    status: 'FAIL',
+                    issue: 'No Feedspace widget selectors matched on the page.'
+                })),
+                aesthetic_results: []
+            };
+        }
+
         if (!this.apiKey) {
             return this.getMockResult(widgetType);
         }
@@ -114,18 +131,21 @@ class AIEngine {
                 aiResults.analysis_message = cleanReasoning;
 
                 // Post-process: Calculate status in JS for stability
-                return this.processResults(aiResults, config, widgetType, staticFeatures);
+                return this.processResults(aiResults, config, widgetType, staticFeatures, geometricWarnings);
 
             } catch (error) {
-                const isRateLimit = error.message.includes('429') || error.status === 429;
+                const isRetriable = error.message.includes('429') || error.status === 429 ||
+                    error.message.includes('503') || error.status === 503 ||
+                    error.message.includes('service is currently unavailable');
+
                 const isTransientFetch = error.message.includes('fetch failed') ||
                     error.message.includes('ECONNRESET') ||
                     error.message.includes('ETIMEDOUT');
 
-                if ((isRateLimit || isTransientFetch) && attempts <= this.maxRetries) {
+                if ((isRetriable || isTransientFetch) && attempts <= this.maxRetries) {
                     const delay = this.initialDelay * Math.pow(2, attempts - 1);
-                    const reason = isRateLimit ? 'Rate limit (429)' : 'Transient network error';
-                    console.warn(`[AIEngine] ${reason}. Retrying in ${delay}ms... (Attempt ${attempts}/${this.maxRetries})`);
+                    const reason = isRetriable ? 'Service/Rate Limit (429/503)' : 'Transient network error';
+                    console.warn(`[AIEngine] ⚠️ ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempts}/${this.maxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
@@ -158,7 +178,7 @@ class AIEngine {
         }
     }
 
-    processResults(aiData, config, widgetType, staticFeatures) {
+    processResults(aiData, config, widgetType, staticFeatures, geometricWarnings) {
         if (!aiData || !aiData.feature_results) return aiData;
 
         // 1. Strict Filter: only include features defined in the config (staticFeatures)
@@ -196,8 +216,8 @@ class AIEngine {
                 "loss-of-sharpness", "missing-elements", "clipped-fail", "sliced-fail",
                 "json-leakage", "raw-code", "json-leak", "muddy"
             ];
-            
-            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing"]; 
+
+            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing"];
 
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
@@ -263,11 +283,10 @@ class AIEngine {
         const friendlyErrorMap = {
             "DESCENDERS_SLICED": "Review text is horizontally clipped/bisected at the bottom boundary (Text Truncation).",
             "Q9": "Review text is horizontally clipped/bisected at the bottom boundary (Text Truncation).",
-            "FLAT-WALL": "Container has a sharp, rectilinear cut instead of a rounded border (Clipping Detected).",
-            "Q2": "Container has a sharp, rectilinear cut instead of a rounded border (Clipping Detected).",
+            "FLAT-WALL": "Component end unexpectedly on a straight, unrounded axis (Truncation Detected).",
+            "Q2": "Component end unexpectedly on a straight, unrounded axis (Truncation Detected).",
             "CHOPPED": "Card corners are asymmetric; detected a sharp 90° cut vs. a rounded edge.",
             "ASYMMETRIC": "Layout corners are asymmetric (Uneven rounding/padding detected).",
-            "SQUEEZED-FAIL": "Ratings or text are touching the container edge (Gutter failure detected).",
             "FAIL_CONTAINMENT_COLLISION": "Content collision detected (Text or stars overlapping other elements).",
             "FAIL_LAYOUT_CLIPPED": "Widget content is bleeding off the screen or container boundary.",
             "FAIL_TEXT_TRUNCATED": "Text is cut off mid-sentence or lacks vertical clearance (Squeeze Failure).",
@@ -293,13 +312,11 @@ class AIEngine {
         };
 
         // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
-        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "truncated", "cut off", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "bottom part is cut", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out"];
+        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "truncated", "cut off", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "SYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
         const layoutLine = findAdmission(layoutKeywords);
         const mentionsLayoutIssue = (
             analysisMessage.includes("FAIL_LAYOUT_CLIPPED") ||
             analysisMessage.includes("FAIL_LAYOUT_ASYMMETRIC") ||
-            analysisMessage.includes("ASYMMETRIC") ||
-            analysisMessage.includes("SYMMETRY") ||
             layoutLine
         ) && !analysisMessage.includes("PASS_FORCE_LAYOUT");
 
@@ -313,18 +330,21 @@ class AIEngine {
 
         // ── SHARPNESS: Strict tokens + Fuzzy Keyword fallback ──
         const blurKeywords = [
-            "slightly soft", "compressed image", "low-res", "fuzzy", "blur", 
+            "slightly soft", "compressed image", "low-res", "fuzzy", "blur",
             "pixelated", "smeared", "watercolor", "muddy texture", "poor clarity",
             "smooth texture", "clean appearance", "interpolation", "high-level smoothing",
             "water-color", "cloud-like", "soft detail", "hybrid sharpness", "differential fail",
-            "softer than text"
+            "softer than text", "partially cut", "sliced", "half-moon", "flattened edge", "rectilinear cut",
+            "flattened arc", "straight line cut", "star overlap", "duplicated text", "border touching boundary"
         ];
-        
-        const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", ...blurKeywords]);
+
+        const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", "FAIL_SHARP_PIXELATION", "FAIL_SHARP_MACRO_BLOCKING", ...blurKeywords]);
         const mediaBlurLine = findAdmission(["FAIL_SHARP_MEDIA", ...blurKeywords]);
-        
+
         const mentionsAvatarSharpness = (
             analysisMessage.includes("FAIL_SHARP_AVATAR") ||
+            analysisMessage.includes("FAIL_SHARP_PIXELATION") ||
+            analysisMessage.includes("FAIL_SHARP_MACRO_BLOCKING") ||
             analysisMessage.includes("CRITICAL_AVATAR_FAILURE") ||
             avatarBlurLine
         ) && !analysisMessage.includes("PASS_FORCE_SHARP");
@@ -370,47 +390,26 @@ class AIEngine {
 
         const iconProof = extractProof(iconLine);
 
-        // ── Apply AUTO-FAIL overrides where reasoning contradicts JSON PASS ──
+        // 🛡️ REASONING AUDIT: If the AI mentions a clinical defect in its reasoning but passes the JSON, lock the failure.
         if (mentionsLayoutIssue || mentionsAvatarSharpness || mentionsMediaSharpness || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
             (aiData.aesthetic_results || []).forEach(res => {
                 const cat = res.category.toUpperCase();
-                
                 if (res.status === "PASS") {
-                    if (mentionsBlockageIssue) {
+                    if (cat.includes("LAYOUT") && mentionsLayoutIssue) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Blockage: ${toFriendlyError(layoutLine, "Partially cut or obscured widget detected.")}`;
-                        res.severity = "CRITICAL";
-                    } else if (cat.includes("LAYOUT") && mentionsLayoutIssue) {
-                        res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Layout: ${toFriendlyError(layoutLine, "Clipped edges or layout integrity failure.")}`;
+                        res.issue = `[CRITICAL] Visual audit override: ${toFriendlyError(layoutLine, "Layout integrity failure.")}`;
                         res.severity = "CRITICAL";
                     } else if (cat.includes("AVATAR") && mentionsAvatarSharpness) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Avatar Quality: ${toFriendlyError(avatarBlurLine, "Blur or interpolation detected in avatars.")}`;
+                        res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(avatarBlurLine, "Blur detected in avatars.")}`;
                         res.severity = "CRITICAL";
                     } else if (cat.includes("MEDIA") && mentionsMediaSharpness) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Media Quality: ${toFriendlyError(mediaBlurLine, "Blur or interpolation detected in logos/images.")}`;
-                        res.severity = "CRITICAL";
-                    } else if (cat.includes("CONTAINMENT") && mentionsContainmentIssue) {
-                        res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Containment: ${toFriendlyError(containmentLine, "Element overlap or collision detected.")}`;
-                        res.severity = "CRITICAL";
-                    } else if (cat.includes("CONTENT") && mentionsContentIssue) {
-                        res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Content: ${toFriendlyError(contentLine, "Truncation or JSON leak detected.")}`;
-                        res.severity = "CRITICAL";
-                    } else if (cat.includes("SPACING") && mentionsLayoutIssue) {
-                         res.status = "FAIL";
-                         res.issue = `[Auto-Fail] Spacing: ${toFriendlyError(layoutLine, "Layout spacing imbalance detected.")}`;
-                         res.severity = "CRITICAL";
-                    } else if ((cat.includes("TEXT") || cat.includes("CONTENT")) && mentionsDateIssue) {
-                        res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Date Format: ${toFriendlyError(dateLine, "Rule 14 violation.")}`;
+                        res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(mediaBlurLine, "Blur detected in logos/images.")}`;
                         res.severity = "CRITICAL";
                     } else if (cat.includes("ICON") && mentionsIconIssue) {
                         res.status = "FAIL";
-                        res.issue = `[Auto-Fail] Icon Visibility: ${iconLine || "Social icon visible despite being OFF in config."}`;
+                        res.issue = `[CRITICAL] Configuration override: Social icon visible despite being OFF in config.`;
                         res.severity = "CRITICAL";
                     }
                 }
@@ -425,12 +424,12 @@ class AIEngine {
             if (f.remarks) f.remarks = f.remarks.replace(cleaningRegex, "[Data Not Linked]");
             if (f.issue) f.issue = f.issue.replace(cleaningRegex, "[Data Not Linked]");
         });
-        
+
         // --- GLOBAL CLEANUP & FINAL INJECTION: Strip ANY leaking placeholders from analysis_message ---
         if (aiData.analysis_message) {
             // Cleanup first
             aiData.analysis_message = aiData.analysis_message.replace(cleaningRegex, "[Data Not Linked]");
-            
+
             // Try to inject the first ID if still present (for pre-analysis logs)
             if (aiData.analysis_message.includes("[Data Not Linked]") && rawFeeds.length > 0) {
                 const firstId = rawFeeds[0].id || "";
@@ -442,7 +441,7 @@ class AIEngine {
         aiResultsArray.forEach(f => {
             const trait = (f.feature || "").toLowerCase();
             const isRatingOrIcon = trait.includes("rating") || trait.includes("icon") || trait.includes("platform") || trait.includes("date");
-            
+
             // Perform injection for ALL relevant features, regardless of PASS/FAIL status
             if (isRatingOrIcon) {
                 // Determine if this is a "Missing" issue vs a "Visible" issue
@@ -458,18 +457,18 @@ class AIEngine {
                 // Map to the correct feed
                 // Regex improved to capture full names with spaces inside [Card: ...]
                 const cardIdentifier = (f.issue + (f.remarks || "")).match(/Card:\s*([^\]]+)/i)?.[1]?.trim() || "AN";
-                
+
                 let matchingFeed = rawFeeds.find(feed => {
                     const name = (feed.app_user_name || feed.user_name || feed.name || "").toString().toLowerCase();
                     const searchId = feed.id?.toString();
                     const lowerIden = cardIdentifier.toLowerCase();
-                    
-                    return name.includes(lowerIden) || 
-                           lowerIden.includes(name) || 
-                           searchId === lowerIden || 
-                           lowerIden === "an";
+
+                    return name.includes(lowerIden) ||
+                        lowerIden.includes(name) ||
+                        searchId === lowerIden ||
+                        lowerIden === "an";
                 });
-                
+
                 // Fallback: If only one card exists, use the first feed
                 if (!matchingFeed && rawFeeds.length === 1) matchingFeed = rawFeeds[0];
 
@@ -477,13 +476,13 @@ class AIEngine {
                     const isRatingTrait = trait.includes("rating");
                     const isIconTrait = trait.includes("icon") || trait.includes("platform");
                     const isDateTrait = trait.includes("date");
-                    
+
                     let hasNullData = false;
-                    
+
                     if (isRatingTrait) {
-                        hasNullData = matchingFeed.rating === null || 
-                                     matchingFeed.rating === 0 || 
-                                     matchingFeed.rating === "0";
+                        hasNullData = matchingFeed.rating === null ||
+                            matchingFeed.rating === 0 ||
+                            matchingFeed.rating === "0";
                     } else if (isIconTrait) {
                         // FORCE DEFAULT: If show_platform_icon is missing from config, we assume it's OFF ('0')
                         const showIconConfig = config?.widget_customization?.show_platform_icon ?? "0";
@@ -491,11 +490,11 @@ class AIEngine {
                         const feedType = matchingFeed.feed_type || "";
                         const isManualReview = slug.includes("manual");
                         const isVideoFeed = feedType === "video_feed";
-                        
-                        hasNullData = (showIconConfig === "0") || 
-                                     isManualReview || 
-                                     isVideoFeed || 
-                                     (!matchingFeed.social_platform && !matchingFeed.review_url);
+
+                        hasNullData = (showIconConfig === "0") ||
+                            isManualReview ||
+                            isVideoFeed ||
+                            (!matchingFeed.social_platform && !matchingFeed.review_url);
                     } else if (isDateTrait) {
                         hasNullData = !matchingFeed.review_at;
                     }
@@ -533,11 +532,55 @@ class AIEngine {
             }
         });
 
-        // 3. Recalculate overall status
-        const hasFeatureFailures = (aiData.feature_results || []).some(f => f.status === "FAIL");
-        const hasAestheticFailures = (aiData.aesthetic_results || []).some(a => a.status === "FAIL");
+        // 🛡️ TOTAL TRUTH OVERRIDE: Synchronize mathematical defects ONLY for confirmed FAILURES
+        if (geometricWarnings && geometricWarnings.length > 0) {
+            // Strictly exclude SYMMETRY_SIGNAL which is an audit suggestion, not a hard failure.
+            const clinicalDefects = geometricWarnings.filter(msg => 
+                (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') || 
+                msg.includes('PARTIAL') || msg.includes('CUT')) && 
+                !msg.includes('SYMMETRY_SIGNAL')
+            );
+            
+            if (clinicalDefects.length > 0) {
+                console.log(`[AIEngine] 🛡️ TRUTH OVERRIDE: Clinical boundary violation detected. Forcing FAIL.`);
+                
+                if (aiData.aesthetic_results) {
+                    clinicalDefects.forEach(defect => {
+                        let targetCategory = "A."; 
+                        if (defect.includes('SHARP') || defect.includes('MEDIA')) targetCategory = "E.";
+                        if (defect.includes('POPUP') || defect.includes('MODAL')) targetCategory = "G.";
+                        
+                        const catObj = aiData.aesthetic_results.find(r => 
+                            r.category.toUpperCase().includes(targetCategory.toUpperCase())
+                        );
+                        
+                        if (catObj) {
+                            catObj.status = 'FAIL';
+                            catObj.issue = `[CRITICAL] Mathematical Audit override: ${defect}`;
+                            catObj.severity = 'CRITICAL';
+                        }
+                    });
+                }
+                aiData.overall_status = 'FAIL';
+            }
+        }
 
-        aiData.overall_status = (hasFeatureFailures || hasAestheticFailures) ? "FAIL" : "PASS";
+        // 🛡️ FINAL CONSISTENCY SYNC (IRON LOCK)
+        // If overall is FAIL, ensure at least one category is FAIL.
+        if (aiData.overall_status === 'FAIL' && aiData.aesthetic_results) {
+            const anyAestheticFail = aiData.aesthetic_results.some(r => r.status === 'FAIL');
+            const anyFeatureFail = aiData.feature_results.some(r => r.status === 'FAIL');
+            
+            if (!anyAestheticFail && !anyFeatureFail) {
+                console.log('[AIEngine] ⚠️ Consistency violation: Overall FAIL with all PASS results. Forcing Category A to FAIL.');
+                const aCat = aiData.aesthetic_results.find(r => r.category.includes('A.'));
+                if (aCat) {
+                    aCat.status = 'FAIL';
+                    aCat.issue = '[CRITICAL] Layout consistency failure triggered by system audit.';
+                    aCat.severity = 'HIGH';
+                }
+            }
+        }
 
         return aiData;
     }

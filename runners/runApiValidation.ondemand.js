@@ -23,8 +23,11 @@ function normalizeUrl(url) {
 function loadProcessedUrls() {
     if (fs.existsSync(PROCESSED_URLS_FILE)) {
         try {
-            const data = JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8'));
-            return Array.isArray(data) ? data.map(normalizeUrl) : [];
+            const content = fs.readFileSync(PROCESSED_URLS_FILE, 'utf8').trim();
+            if (content) {
+                const data = JSON.parse(content);
+                return Array.isArray(data) ? data.map(normalizeUrl) : [];
+            }
         } catch (e) {
             console.error('[OnDemand] Failed to load processed_urls_ondemand.json, starting fresh.');
             return [];
@@ -42,7 +45,13 @@ function saveProcessedUrl(url) {
 
     let processed = loadProcessedUrls();
     // We store the original URL but check against normalized versions
-    const rawProcessed = fs.existsSync(PROCESSED_URLS_FILE) ? JSON.parse(fs.readFileSync(PROCESSED_URLS_FILE, 'utf8')) : [];
+    let rawProcessed = [];
+    if (fs.existsSync(PROCESSED_URLS_FILE)) {
+        try {
+            const content = fs.readFileSync(PROCESSED_URLS_FILE, 'utf8').trim();
+            if (content) rawProcessed = JSON.parse(content);
+        } catch (e) { }
+    }
 
     if (!processed.includes(normalized)) {
         rawProcessed.push(url);
@@ -76,7 +85,14 @@ async function run() {
     let allApiData = [];
 
     // ✅ Read ONLY from client_payload — no API call
-    const widgetData = process.env.WIDGET_DATA ? JSON.parse(process.env.WIDGET_DATA) : null;
+    let widgetData = null;
+    if (process.env.WIDGET_DATA) {
+        try {
+            widgetData = JSON.parse(process.env.WIDGET_DATA);
+        } catch (e) {
+            console.error('[OnDemand] Failed to parse WIDGET_DATA env variable.');
+        }
+    }
 
     if (!widgetData) {
         console.log('[OnDemand] No payload data received. Exiting.');
@@ -145,11 +161,17 @@ async function run() {
     console.log(`[OnDemand] ${newUrls.length} NEW URL(s) to process after filtering.`);
 
     const browser = await chromium.launch({
-        headless: true,
+        headless: true, // Always headless on-demand (GitHub Actions)
+        channel: 'chrome', // Use branded Chrome for higher trust score
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
+            '--disable-infobars',
+            '--window-position=0,0',
+            '--ignore-certificate-errors',
+            '--ignore-certificate-errors-spki-list',
+            '--disable-web-security',
             '--use-fake-ui-for-media-stream',
             '--use-fake-device-for-media-stream'
         ],
@@ -181,11 +203,15 @@ async function run() {
             const context = await browser.newContext({
                 viewport: { width: targetWidth, height: targetHeight },
                 deviceScaleFactor: 2,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
                 locale: 'en-US',
                 timezoneId: 'Asia/Dubai',
                 extraHTTPHeaders: {
-                    'Accept-Language': 'en-US,en;q=0.9'
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Upgrade-Insecure-Requests': '1'
                 }
             });
             const page = await context.newPage();
@@ -200,7 +226,15 @@ async function run() {
 
                 let staticFeatures = null;
                 if (fs.existsSync(configPath)) {
-                    staticFeatures = JSON.parse(fs.readFileSync(configPath, 'utf8')).features;
+                    try {
+                        const configContent = fs.readFileSync(configPath, 'utf8').trim();
+                        if (configContent) {
+                            const parsed = JSON.parse(configContent);
+                            staticFeatures = parsed.features || parsed;
+                        }
+                    } catch (configErr) {
+                        console.error(`[OnDemand] Failed to parse config ${configFileName}.json: ${configErr.message}`);
+                    }
                 }
 
                 await helper.init(url, typeId, configuration);

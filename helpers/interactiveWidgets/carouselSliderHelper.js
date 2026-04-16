@@ -97,6 +97,31 @@ class CarouselSliderHelper {
                 if (focusShot2) screenshots.push(focusShot2);
             }
 
+            // 🛡️ UNIVERSAL EDGE SENTINEL Logic: Check all visible cards for clipping
+            const cardSelector = '.feedspace-embed-card, .feedspace-review-card, .swiper-slide-active, .slick-active';
+            const vSize = page.viewportSize();
+
+            const clips = await page.evaluate((sel, vw, vh) => {
+                const results = [];
+                document.querySelectorAll(sel).forEach((el, idx) => {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 10 && r.height > 10) {
+                        if (r.right > vw + 5) results.push(`FAIL_RIGHT_EDGE_CLIPPED (Card ${idx + 1})`);
+                        if (r.bottom > vh + 5) results.push(`FAIL_BOTTOM_EDGE_CLIPPED (Card ${idx + 1})`);
+                        if (r.left < -5) results.push(`FAIL_LEFT_EDGE_CLIPPED (Card ${idx + 1})`);
+                        if (r.top < -5) results.push(`FAIL_TOP_EDGE_CLIPPED (Card ${idx + 1})`);
+                    }
+                });
+                return results;
+            }, cardSelector, vSize.width, vSize.height);
+
+            if (clips && clips.length > 0) {
+                clips.forEach(msg => {
+                    console.log(`[SYSTEM ALERT] TRUTH DATA: FAIL_LAYOUT_CLIPPED detected in carousel. Issue: ${msg}`);
+                    if (interactionContext.geometricWarnings) interactionContext.geometricWarnings.push(msg);
+                });
+            }
+
             console.log(`[CarouselSliderHelper] Interaction complete. ${screenshots.length} screenshots captured.`);
 
         } catch (error) {

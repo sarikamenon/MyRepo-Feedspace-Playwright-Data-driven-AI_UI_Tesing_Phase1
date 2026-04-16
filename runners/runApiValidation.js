@@ -189,7 +189,14 @@ async function run() {
 
                 let staticFeatures = null;
                 if (fs.existsSync(configPath)) {
-                    staticFeatures = JSON.parse(fs.readFileSync(configPath, 'utf8')).features;
+                    try {
+                        const configContent = fs.readFileSync(configPath, 'utf8').trim();
+                        if (configContent) {
+                            staticFeatures = JSON.parse(configContent).features;
+                        }
+                    } catch (configErr) {
+                        console.error(`[Main] Failed to parse config ${configFileName}.json: ${configErr.message}`);
+                    }
                 }
 
                 await helper.init(url, typeId, configuration);

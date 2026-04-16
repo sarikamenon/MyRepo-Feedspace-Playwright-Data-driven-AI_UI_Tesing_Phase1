@@ -6,7 +6,6 @@ class AvatarGroupHelper {
 
         // 1️⃣ Initial State: Identify Row & Run Static Integrity Probes (Overbleed/Truncation)
         try {
-            await widgetLocator.scrollIntoViewIfNeeded({ timeout: 3000 });
             const box = await widgetLocator.boundingBox();
 
             if (box) {
@@ -220,31 +219,92 @@ class AvatarGroupHelper {
                     }
                 }, { sel: selector, rect: target.rect });
 
-                await page.waitForTimeout(1500);
+                await page.waitForTimeout(3000); // Increased for stability on slower embeds
 
                 const popupSelectors = '.feedspace-avatar-review-popup, .fe-review-box, .fe-modal-content';
-
-                // Truncation Probe
-                const truncationCheck = await page.evaluate((sel) => {
-                    const popup = document.querySelector(sel);
-                    if (popup) {
-                        const r = popup.getBoundingClientRect();
-                        const distToBottom = window.innerHeight - r.bottom;
-                        return { isTruncated: distToBottom < 5, val: distToBottom };
-                    }
-                    return null;
-                }, popupSelectors);
-
-                if (truncationCheck && truncationCheck.isTruncated) {
-                    const msg = `TRUTH DATA: Popup ${i + 1} is TRUNCATED (hitting viewport bottom). Distance: ${Math.round(truncationCheck.val)}px.`;
-                    console.log(`[SYSTEM ALERT] ${msg}`);
-                    if (geometricWarnings) geometricWarnings.push(msg);
-                }
-
                 const popupLocator = page.locator(popupSelectors).filter({ visible: true }).first();
                 const popupBox = await popupLocator.boundingBox().catch(() => null);
+                const vSize = page.viewportSize();
 
-                if (popupBox) {
+                if (!popupBox) {
+                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] No visible popup found using selectors: ${popupSelectors}`);
+                    console.log(`[AvatarGroupHelper] Case ${i + 1}: No popup detected after click.`);
+                    consecutiveFails++;
+                } else {
+                    const rect = popupBox;
+                    const vSize = page.viewportSize();
+                    const distToBottom = vSize.height - (rect.y + rect.height);
+                    const distToRight = vSize.width - (rect.x + rect.width);
+                    
+                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] Boundary Check: y=${Math.round(rect.y)}, h=${Math.round(rect.height)}, x=${Math.round(rect.x)}, w=${Math.round(rect.width)}. Viewport=${vSize.width}x${vSize.height}.`);
+
+                    // 🛡️ UNIVERSAL EDGE SENTINEL Logic
+                    let edgeFail = null;
+                    if (distToBottom < 20) edgeFail = `FAIL_BOTTOM_EDGE_CLIPPED (Gap: ${Math.round(distToBottom)}px)`;
+                    else if (rect.y < 5) edgeFail = `FAIL_TOP_EDGE_CLIPPED (y: ${Math.round(rect.y)}px)`;
+                    else if (distToRight < 10) edgeFail = `FAIL_RIGHT_EDGE_CLIPPED (Gap: ${Math.round(distToRight)}px)`;
+                    else if (rect.x < 5) edgeFail = `FAIL_LEFT_EDGE_CLIPPED (x: ${Math.round(rect.x)}px)`;
+
+                    if (edgeFail) {
+                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Popup ${i + 1} is SLICED at the boundary. Issue: ${edgeFail}.`;
+                        console.log(`[SYSTEM ALERT] ${msg}`);
+                        if (geometricWarnings) geometricWarnings.push(msg);
+                    }
+
+                    // 🛡️ Parent Container Clipping Check (New) - Detects if parent has overflow:hidden
+                    const isParentClipped = await popupLocator.evaluate((el) => {
+                        const getClippedParent = (node) => {
+                            let p = node.parentElement;
+                            while (p && p !== document.body) {
+                                const s = window.getComputedStyle(p);
+                                if (s.overflow !== 'visible') {
+                                    const pRect = p.getBoundingClientRect();
+                                    const elRect = node.getBoundingClientRect();
+                                    // If element bottom is > parent bottom, it is being sliced by the parent
+                                    if (elRect.bottom > pRect.bottom + 5) return p.className || p.tagName;
+                                }
+                                p = p.parentElement;
+                            }
+                            return null;
+                        };
+                        return getClippedParent(el);
+                    }).catch(() => null);
+
+                    if (isParentClipped) {
+                        const msg = `TRUTH DATA: FAIL_CONTAINER_CLIPPED detected. Popup ${i + 1} is sliced by parent container (${isParentClipped}). The text is being cut off vertically.`;
+                        console.log(`[SYSTEM ALERT] ${msg}`);
+                        if (geometricWarnings) geometricWarnings.push(msg);
+                    }
+
+                    // 🛡️ Intersection Audit (Strict visibility check)
+                    const visibleRatio = await popupLocator.evaluate((el) => {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) return 0;
+                        const vHeight = window.innerHeight;
+                        const vWidth = window.innerWidth;
+                        const visibleHeight = Math.min(r.bottom, vHeight) - Math.max(r.top, 0);
+                        const visibleWidth = Math.min(r.right, vWidth) - Math.max(r.left, 0);
+                        return (visibleHeight * visibleWidth) / (r.height * r.width);
+                    }).catch(() => 1);
+
+                    if (visibleRatio < 0.98) {
+                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Only ${Math.round(visibleRatio * 100)}% of the review card is visible. Content is being SQUEEZED or SLICED.`;
+                        console.log(`[SYSTEM ALERT] ${msg}`);
+                        if (geometricWarnings) geometricWarnings.push(msg);
+                    }
+
+                    // 🛡️ Internal Overflow Audit (Detects text hidden inside the box)
+                    const internalOverflow = await popupLocator.evaluate((el) => {
+                        const isClipped = el.scrollHeight > el.clientHeight + 2;
+                        return { isClipped, sh: el.scrollHeight, ch: el.clientHeight };
+                    }).catch(() => ({ isClipped: false }));
+
+                    if (internalOverflow.isClipped) {
+                        const msg = `TRUTH DATA: FAIL_TEXT_TRUNCATED detected. Content is ${internalOverflow.sh}px but the box is only ${internalOverflow.ch}px. Text is sliced inside the container.`;
+                        console.log(`[SYSTEM ALERT] ${msg}`);
+                        if (geometricWarnings) geometricWarnings.push(msg);
+                    }
+
                     // 🛡️ Content Fingerprint Check
                     const fingerprint = await popupLocator.evaluate((el, index) => {
                         const nameEl = el.querySelector('.fe-reviewer-name, [class*="name"]');
@@ -268,8 +328,25 @@ class AvatarGroupHelper {
                         consecutiveFails = 0; // Reset strikes on a fresh find
                         if (fingerprint) capturedFingerprints.add(fingerprint);
 
-                        // 📸 Viewport Capture (Moved here to prevent redundant screenshots)
+                        // 🛡️ Linguistic Truth Injection (Extract last words for AI to verify)
+                        const lastWords = await popupLocator.evaluate((el) => {
+                            const textEl = el.querySelector('.fe-review-text, [class*="text"]');
+                            if (!textEl) return '';
+                            const text = textEl.innerText.trim();
+                            const words = text.split(/\s+/);
+                            // Return the last 4 words for a strong linguistic anchor
+                            return words.slice(-4).join(' ');
+                        }).catch(() => '');
+
+                        if (lastWords) {
+                            const msg = `TRUTH DATA: DOM_END_TEXT is "${lastWords}". If the screenshot ends before these words, it is a FAIL.`;
+                            console.log(`[SYSTEM ALERT] ${msg}`);
+                            if (geometricWarnings) geometricWarnings.push(msg);
+                        }
+
+                        // 📸 Viewport Capture (Restored Baseline)
                         console.log(`[AvatarGroupHelper] Case ${i + 1}: Unique review confirmed. Capturing Viewport...`);
+                        await page.waitForTimeout(1000); // Brief stabilization wait
                         screenshotBuffers.push(await page.screenshot({ fullPage: false, animations: 'disabled' }));
 
                         const vSize = page.viewportSize();
@@ -283,11 +360,8 @@ class AvatarGroupHelper {
                             height: Math.min(popupBox.height + (padding * 2), vSize.height - clipY)
                         };
                         screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
-                        console.log(`[AvatarGroupHelper] Unique review captured: ${fingerprint ? fingerprint.split('|')[0] : 'Unknown'}`);
+                    console.log(`[AvatarGroupHelper] Unique review captured: ${fingerprint ? fingerprint.split('|')[0] : 'Unknown'}`);
                     }
-                } else {
-                    console.log(`[AvatarGroupHelper] Case ${i + 1}: No popup detected after click.`);
-                    consecutiveFails++;
                 }
 
                 // Close popup to avoid overlap

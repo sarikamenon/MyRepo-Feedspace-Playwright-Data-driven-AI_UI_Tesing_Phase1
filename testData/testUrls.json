@@ -1,52 +1,11 @@
 {
     "data": [
         {
-            "url": "https://biz-academy.it/intelligenza-artificiale-corso/",
-            "type": "floating_toast",
+            "url": "https://live.chefliferadio.com/",
+            "type": "strip_slider",
             "configurations": {
                 "custom_css": null,
                 "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://keywords.am/",
-            "type": "avatar_group",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://www.lambstudios.online/",
-            "type": "floating_toast",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://www.feedspace.io/mobile/hindi-testimonial-form-1",
-            "type": "avatar_group",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://eurorenovations.ca/lp/bathroom-renovation/",
-            "type": "avatar_group",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://businesscoachacademy.com/the-profit-coach-programme-letter-page",
-            "type": "avatar_carousel",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1",
-                "shadow_size": "2"
             }
         }
     ]

@@ -82,8 +82,18 @@ async function run() {
             const localPath = path.join(process.cwd(), 'testData', 'testUrls.json');
 
             if (fs.existsSync(localPath)) {
-                const raw = JSON.parse(fs.readFileSync(localPath, 'utf8'));
-                testData = Array.isArray(raw) ? raw : (raw.data || []);
+                try {
+                    const localContent = fs.readFileSync(localPath, 'utf8').trim();
+                    if (localContent) {
+                        const raw = JSON.parse(localContent);
+                        testData = Array.isArray(raw) ? raw : (raw.data || []);
+                    } else {
+                        testData = [];
+                    }
+                } catch (e) {
+                    console.error(`[Main] Failed to parse local testUrls.json: ${e.message}`);
+                    testData = [];
+                }
             } else {
                 throw new Error('testData/testUrls.json not found. Please create it for local testing.');
             }
@@ -101,10 +111,16 @@ async function run() {
 
     const browser = await chromium.launch({
         headless: !!process.env.CI,
+        channel: 'chrome', // Use branded Chrome for higher trust score
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
+            '--disable-infobars',
+            '--window-position=0,0',
+            '--ignore-certificate-errors',
+            '--ignore-certificate-errors-spki-list',
+            '--disable-web-security',
             '--use-fake-ui-for-media-stream',
             '--use-fake-device-for-media-stream'
         ],
@@ -135,11 +151,15 @@ async function run() {
             const context = await browser.newContext({
                 viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 1080 },
                 deviceScaleFactor: 2,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
                 locale: 'en-US',
-                timezoneId: 'Asia/Dubai', // Matches user GMT+4 context
+                timezoneId: 'Asia/Dubai',
                 extraHTTPHeaders: {
-                    'Accept-Language': 'en-US,en;q=0.9'
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Upgrade-Insecure-Requests': '1'
                 }
             });
 
@@ -161,9 +181,16 @@ async function run() {
 
                 let staticFeatures = null;
                 if (fs.existsSync(configPath)) {
-                    const configContent = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                    staticFeatures = configContent.features;
-                    console.log(`[Main] 📂 Local Config Loaded: ${configFileName}.json (${staticFeatures.length} features)`);
+                    try {
+                        const configContent = fs.readFileSync(configPath, 'utf8').trim();
+                        if (configContent) {
+                            const parsed = JSON.parse(configContent);
+                            staticFeatures = parsed.features || parsed;
+                            console.log(`[Main] 📂 Local Config Loaded: ${configFileName}.json (${Array.isArray(staticFeatures) ? staticFeatures.length : 'N/A'} features)`);
+                        }
+                    } catch (configErr) {
+                        console.error(`[Main] Failed to parse config ${configFileName}.json: ${configErr.message}`);
+                    }
                 } else {
                     console.warn(`[Main] ⚠️  Warning: No local feature config found at ${configPath}. AI will auto-detect features.`);
                 }

@@ -27,12 +27,11 @@ class FloatingToastHelper {
         console.log('[FloatingToastHelper] Starting hardened unique multi-card validation loop...');
         const screenshotBuffers = [];
         const capturedSignatures = new Set();
-        const maxUniqueCaptures = 6;
+        const maxUniqueCaptures = 12;
 
         const previewSelectors = [
-            '.fe-floating-preview', '.fe-toast-card', '.fe-floating-toast', '[class*="floating-toast"]',
-            '[class*="toast-preview"]', '.feedspace-toast', '.feedspace-card', '.fe-chat-bubble',
-            '.fe-bubble-launcher', '[class*="chat-box"]'
+            '.fe-floating-preview', '.fe-toast-card', '.fe-floating-toast', '.fe-shadow-container',
+            '.feedspace-toast', '.feedspace-card', '.fe-chat-bubble', '.fe-bubble-launcher'
         ];
         const expandedSelectors = [
             '.fe-review-box', '.fe-modal-content', '[class*="review-box"]', '.feedspace-expanded-review'
@@ -182,10 +181,21 @@ class FloatingToastHelper {
                         return { isTruncated: false };
                     }, expandedSelectors);
 
-                    if (truncationCheck.isTruncated) {
-                        const msg = `TRUTH DATA: Floating Toast popup for "${signature.substring(0, 20)}..." is truncated (Flat Wall at bottom).`;
-                        console.log(`[SYSTEM ALERT] ${msg}`);
-                        if (geometricWarnings) geometricWarnings.push(msg);
+                    if (truncationCheck.isTruncated || truncationCheck.distToBottom < 10) {
+                        const rect = truncationCheck.rect || {};
+                        const vSize = page.viewportSize();
+                        let edgeFail = null;
+                        
+                        if (truncationCheck.distToBottom < 20) edgeFail = `FAIL_BOTTOM_EDGE_CLIPPED (Gap: ${Math.round(truncationCheck.distToBottom)}px)`;
+                        else if (rect.y < 5) edgeFail = `FAIL_TOP_EDGE_CLIPPED (y: ${Math.round(rect.y)}px)`;
+                        else if ((vSize.width - rect.right) < 10) edgeFail = `FAIL_RIGHT_EDGE_CLIPPED (Gap: ${Math.round(vSize.width - rect.right)}px)`;
+                        else if (rect.x < 5) edgeFail = `FAIL_LEFT_EDGE_CLIPPED (x: ${Math.round(rect.x)}px)`;
+
+                        if (edgeFail) {
+                            const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Floating Toast popup is SLICED. Issue: ${edgeFail}.`;
+                            console.log(`[SYSTEM ALERT] ${msg}`);
+                            if (geometricWarnings) geometricWarnings.push(msg);
+                        }
                     }
 
                     // 📸 Precision Composite Capture (Hardened Viewport Clipping)
@@ -196,7 +206,12 @@ class FloatingToastHelper {
                         function scan(node) {
                             if (!node) return;
                             const s = window.getComputedStyle(node);
-                            if (s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0.1) {
+                            
+                            // 🕵️ Brand Filter: Only includes elements that have Feedspace signatures in class, ID, or Tag
+                            const name = (node.className || "").toString().toLowerCase() + (node.id || "").toString().toLowerCase() + (node.tagName || "").toString().toLowerCase();
+                            const isFeedspace = name.includes('fe-') || name.includes('feedspace');
+
+                            if (isFeedspace && s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0.1) {
                                 const r = node.getBoundingClientRect();
                                 if (r.width > 5 && r.height > 5) {
                                     minX = Math.min(minX, r.left);
@@ -210,7 +225,7 @@ class FloatingToastHelper {
                             if (node.shadowRoot) Array.from(node.shadowRoot.children || []).forEach(c => scan(c));
                         }
 
-                        // Start scan from document body to find all detached/shadow elements
+                        // Start scan from document body
                         scan(document.body);
 
                         return found ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null;
