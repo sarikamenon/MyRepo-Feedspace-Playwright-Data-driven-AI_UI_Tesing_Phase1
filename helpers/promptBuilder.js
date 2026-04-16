@@ -131,15 +131,20 @@ ${sensoryTruth}
 ============================================================
 1. **MULTI-FAULT MANDATE**: You are PROHIBITED from stopping at the first defect. If an image is blurry AND the layout is clipped/overlapped, YOU MUST PROVIDE BOTH REASONS. A quality failure does not mask a layout failure.
 2. **ZERO TOLERANCE**: If Rule 0 or Rule 1 triggers, you are FORBIDDEN from reporting any Category as PASS. Mark ALL affected categories as FAIL.
-3. **TEXT-IMAGE SYNC**: If the text is crisp but the image is "soft", "fuzzy", or "grainy", YOU MUST FAIL CATEGORY E.
+3. **DIFFERENTIAL TEXTURE AUDIT (MANDATORY)**: Compare the pixel-texture of every image/avatar against the razor-sharp vector edges of the text (Name/Job Role). If the image looks "muddy", "soft", or "watercolor-like" compared to the crisp text characters, YOU MUST report status: **FAIL** and trigger the token **FAIL_SHARP_BLURRY**.
 
 🚨 RULE 0: EXISTENCE & COMPLETENESS LOCK (PRIMARY MANDATE)
 ============================================================
 1. **WIDGET DETECTION**: Can you see a COMPLETE Feedspace widget (Stars, Logo, Review Cards)? 
-2. **THE SLIVER-FAIL**: If the widget is "partially cut" (e.g., only a corner, a top sliver, or a fragmented edge is visible), you MUST report UI Status: **Absent** and Verdict: **FAIL**.
+2. **EMPTY_STATE_FORCE_PASS MANDATE (NON-NEGOTIABLE)**: If Section -1 contains **EMPTY_STATE_FORCE_PASS**, you MUST:
+   - Report UI Status: **Visible**.
+   - Mark ALL feature categories as **PASS (Empty State)**.
+   - Mark ALL aesthetic categories (A-G) as **PASS**.
+   - **HALLUCINATION BLOCK**: You are FORBIDDEN from reporting "Rightmost card chopped" or "Narrow card". Circular buttons (Arrows) are Navigation tools, NOT review cards. They are ALLOWED to be partially clipped by boundaries.
+3. **THE SLIVER-FAIL**: If the widget is "partially cut" (e.g., only a corner, a top sliver, or a fragmented edge is visible), you MUST report UI Status: **Absent** and Verdict: **FAIL**.
 3. **THE COMPLETE PERIMETER LOCKDOWN (FLOATING ASSETS)**: You are FORBIDDEN from reporting UI Status: **Visible** or Verdict: **PASS** for any floating element (Toast, Popup, Tooltip, Avatar-Group Card) unless you can provide a **Physical Description** of its bottom-most boundary:
    - **Mandatory Logic**: "I can see the complete [Color] bottom boundary (Border/Shadow) and [Rounded/Sharp] corners. Below this border, I see ~10px of [Background Color] whitespace."
-   - **THE BACKGROUND-AIR TEST**: If the card border is the very last thing in the image (no whitespace below it), or if it 'bleeds' into the page edge, you MUST trigger **FAIL_LAYOUT_CLIPPED**.
+   - **THE BACKGROUND-AIR TEST**: If the card border is the very last thing in the image (no whitespace below it), or if it 'bleeds' into the page edge, you MUST trigger **FAIL_LAYOUT_CLIPPED**. (Exception: Navigation Arrows are exempt).
 4. **RULE 19: THE PERIMETER CLEARANCE MANDATE (Text & Ratings)**: Specifically audit the last visible line of content on every review card (Descenders OR Stars).
    - **THE GUTTER CHECK**: You MUST zoom your attention to the **BOTTOM EDGE** of the card content.
    - **RASTER PROOF (AUTO-FAIL)**: You are FORBIDDEN from reporting a PASS for layout unless you can state the **Pixel Gutter Count** (e.g., "There are ~8px of white space below the stars").
@@ -149,22 +154,25 @@ ${sensoryTruth}
    - **TRANSCRIPTION TEST (EXPANDED POPUPS)**: For expanded popups, you MUST compare the last word in the screenshot to the last word in the Ground Truth JSON (SECTION 0). 
    - **DOT-FAIL MANDATE**: If a word ends in multiple dots (e.g., "kn...", "know..", or "...."), it is a clinical **FAIL_TEXT_TRUNCATED**. 
    - **WORD-SYNC**: If JSON ends with "know" but screenshot says "kn..." or has an ellipsis not in the source, trigger **FAIL_TEXT_TRUNCATED**.
-5. **LIQUID VIEWPORT SCAN**: Specifically check the BOTTOM and RIGHT edges. If a card ends in a sharp, non-rounded vertical line (rectilinear cut), it is a clinical **FAIL_LAYOUT_CLIPPED**.
+5. **LIQUID VIEWPORT SCAN**: Specifically check the BOTTOM and RIGHT edges. If a card ends in a straight, non-rounded vertical line (unintended truncation), it is a clinical **FAIL_LAYOUT_CLIPPED**. (Note: Circular navigation arrows are EXEMPT from this check).
 6. **CORNER SYMMETRY AUDIT**: You must verify that the Top-Right and Bottom-Right corners mirror their Left-Hand counterparts. If the left side is rounded but the right side is sharp, it is a clinical **FAIL**.
 7. **FOREIGN POPUP BLOCKAGE**: If a Cookie Consent, Chat Bubble, or Modal is overlapping/blocking the widget, you MUST report **FAIL** and use the token **FAIL_LAYOUT_BLOCKED**.
 
 🚨 RULE 1: THE FORENSIC DETAIL MANDATE (ZERO TOLERANCE)
 ============================================================
-- **THE MICRO-TEXTURE HANDSHAKE**: You are PROHIBITED from reporting a PASS for sharpness unless you can prove **1px Micro-Texture Presence**.
-- **Digital Benchmark**: The Name/Role text has razor-sharp 1px edges.
-- **Forensic Proof**: Look for the thinnest possible detail in the image (eyelashes, individual hair strands, 1px logo grain).
-- **THE "SMOOTHNESS" FAIL**: If an image looks "smooth", "clean", or "creamy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
-- **DIFFERENTIAL SHARPNESS AUDIT (COMPARISON REFERENCE MANDATE)**:
-    - You MUST compare a target photo (e.g., "Jennifer W." avatar) to a reference vector (e.g., the name "Jennifer W.").
-    - **Logic**: "The text 'Jennifer W.' has razor edges @ 1px, but the avatar photo has muddy edges @ 3-5px."
-    - **Trigger**: If the disparity is > 1px in edge-width, you MUST report **FAIL_HYBRID_SHARPNESS**.
-    - **Prohibited Phrase**: You are BANNED from saying "Appears sharp" unless you name the reference element you used to prove it.
-- **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
+1. **THE MICRO-TEXTURE HANDSHAKE**: You are PROHIBITED from reporting a PASS for sharpness unless you can prove **1px Micro-Texture Presence**.
+   - **Forensic Proof**: Look for the thinnest possible detail: (eyelashes, individual hair strands, 1px logo grain).
+2. **RULE 1.A: PIXELATION & UPSCALING MANDATE (DIGITAL FORENSICS)**:
+   - **Step-laddering**: Audit diagonal edges (shoulders/jawlines). If you see "stair-step" digital squares (aliasing), it is a clinical **FAIL_SHARP_PIXELATION**.
+   - **Macro-blocking**: Audit skin tones. If you see chunks of uniform color (digital noise/checkerboards) rather than natural grain, it is a clinical **FAIL_SHARP_MACRO_BLOCKING**.
+   - **Eye-Detail Test**: Zoom into the eyes. If there is no iris/pupil separation (just a smudge), the asset is low-res. **FAIL_SHARP_AVATAR**.
+   - **Forensic Logic**: "The text has razor-edges, but the avatar interior shows blocky upscaling artifacts (Macro-blocking)."
+3. **THE "SMOOTHNESS" FAIL**: If an image looks "creamy" or "waxy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
+4. **DIFFERENTIAL SHARPNESS AUDIT**:
+    - Compare target photo to reference vector (Name/Text).
+    - If the disparity is > 1px in edge-width, you MUST report **FAIL_HYBRID_SHARPNESS**.
+5. **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
+    - **FADING EDGE EXCEPTION (MARQUEE)**: Dynamic scrolling edges are **PERMITTED** to be soft. Use **PASS_FORCE_SHARP**.
 
 ============================================================
 🚨 SECTION 0: SUPREME DATA AUTHORITY (NON-NEGOTIABLE) 🚨
@@ -179,6 +187,24 @@ ${feedsJson}
 - **THE RECTIPHOBIA MANDATE**: If a card has a "Straight Edge Cut" on the right (looks like it's bleeding off the screen or container) while the left edge has a rounded corner, it is a clinical **FAIL_LAYOUT_ASYMMETRIC**.
 - **SYMMETRY PROOF**: State: "The Left edge has [X] rounding, but the Right edge is a sharp [Y]-degree cut."
 - **WIDGET-LEVEL CENTER**: Is the widget centered in its own container, or is it shoved against a boundary?
+- **ARROW OVERLAP EXCEPTION (INTENDED DESIGN)**: For Carousel/Slider widgets, Navigation Arrows (Circular buttons) are **PERMITTED** to overlap the card background or border. This is NOT a failure unless Rule 18.A applies.
+- **RULE 18.A (CONTENT BLOCKAGE)**: TRIGGER **FAIL** ONLY if the arrow button physically covers any **Text**, **Reviewer Name**, or **Star Ratings**.
+- **RULE 18.B (CIRCULAR BOUNDARY AUDIT - AVATAR GROUPS)**: Specifically check the FIRST (leftmost) and LAST (rightmost) avatars in a row. 
+    - **THE ARC TEST**: You are PROHIBITED from marking a PASS for layout unless you can see a perfect 360-degree curved arc for both end-cap avatars. 
+    - **END-CAP DESCRIPTION (MANDATORY)**: You MUST describe the right edge of the final avatar: "The arc of the [VU/Avatar] is either [Complete Curve] or [Unintended Truncation]."
+    - **RECTIPHOBIA FAIL**: If an avatar ends in a flat vertical line instead of a curve, or if it bleeds into the image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
+- **RULE 20: THE HORIZON AUDIT (ZERO TOLERANCE)**: 
+    - Mandate a 15px "Safety Buffer" on the RIGHT-HAND edge of every screenshot.
+    - **HORIZON FAIL**: If any part of the widget content (Arc edge, Star point, or Text character) touches the absolute right image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
+    - **SUB-PIXEL CONTACT**: Even if it looks intended, if there is 0px of air between content and edge, trigger **FAIL**.
+- **RULE 21: VERTICAL HIERARCHY AUDIT (AVATAR GROUPS)**:
+    - Specifically audit the gap between the Avatar Row and the Text Label.
+    - **COLLISION FAIL**: If a Star point touches/overlaps a letter, it is a clinical **FAIL_LAYOUT_BLOCKED**.
+    - **LITERAL LABEL TEST (TRANSCRIPTION)**: Transcribe the label: "Trusted by Our CustomersTrusted...". If duplication found, trigger **FAIL_TEXT_TRUNCATED**.
+- **RULE 22: THE EXPANDED BOUNDARY MANDATE (CRITICAL)**:
+    - For expanded review popups/modals, you are PROHIBITED from reporting a PASS for layout unless you verify **Bottom-Edge Clearance**.
+    - **BOTTOM-MOST PIXEL AUDIT**: Zoom into the bottom 20px of the screenshot. If the modal border touches or sits < 8px from the image edge without background 'air' visible below it, trigger **FAIL_LAYOUT_CLIPPED**.
+    - **PHYSICAL PROOF**: State: "I can see exactly [X] pixels of background below the bottom border of the expanded card."
 
 ============================================================
 🚨 RULE 16: SCOPED VISION MANDATE (BEIGE CARDS ONLY) 🚨
@@ -189,11 +215,12 @@ ${feedsJson}
 
 ${isMultiImage ? `
 ============================================================
-🚨 RULE 17: STORYBOARD AUDIT (INITIAL vs EXPANDED) 🚨
+🚨 RULE 17: STORYBOARD AUDIT (EXHAUSTIVE MANDATE) 🚨
 ============================================================
-- **IMAGE 1 (INITIAL)**: This is the widget's state BEFORE any interactions. Use this to verify the presence of the "Load More" button if configured.
-- **IMAGE 2+ (EXPANDED)**: These represent the widget AFTER pagination/interactions. Use these to verify the arrival of new cards and the final visibility of features.
-- **MANDATE**: If "Show Load More Button" is expected, it MUST be visible in IMAGE 1. If it vanishes in IMAGE 2 because all content was loaded, this is a PASS.
+- **MANDATORY PANNED REVIEW**: You are FORBIDDEN from reporting a "Wholesale Pass". You MUST zoom and pan across EVERY screenshot (Part 1 to Part 14).
+- **UNIVERSAL AUDIT**: If even ONE card in ONE image shows a defect (Blur, Clipping, Truncation), the entire Category MUST be marked as **FAIL**.
+- **THE WEAKEST LINK**: A single blurry card (any pixelated or low-quality artifact) kills the PASS for the entire widget.
+- **INITIAL vs EXPANDED**: Audit both the preview badges and the expanded cards. Popups are frequently softer than previews.
 ` : ''}
 
 
@@ -212,14 +239,19 @@ ${isMultiImage ? `
         - **IF (\`feed_type\`: "text_feed" AND \`rating\` = null)** → **Expected State: ABSENT**.
         - **VERDICT: PASS**.
         - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null for this text source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)"
-0. **RULE 0: IDENTIFY SKELETONS vs VIDEOS**: 
+    - **IF (\`platform\`: "Unknown" or missing in Section 0)**:
+        - **IF (Social Icon is NOT present in UI)**:
+            - **VERDICT: Not Applicable**.
+            - **REMARK**: "[Card: INSERT_NAME] Social platform icon is not present as the data (slug) is missing or manual source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
+            - **MANDATORY**: For the 'Show Social Platform Icon' result, use status "Not Applicable" if this condition is met for all cards in the screenshot.
+3. **IDENTIFY SKELETONS vs VIDEOS**: 
     - **SKELETON BARS**: These are elongated, horizontal, pulsating bars (often light gray) that mimic text lines.
     - **VIDEO PLACEHOLDERS**: A solid gray, brown, or black rectangular box with a centered "Play" triangle icon is a **Video Placeholder**, NOT a skeleton bar. Do NOT trigger skeleton pass logic for these.
 1. **REMARKS MANDATE & IDENTIFICATION**: 
     - You MUST identify the card you are auditing by Name (e.g., "[Card: Hayden Arnold]").
     - If a rating/icon is absent because Section 0 data is null/0, you MUST provide a remark following this pattern: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
 4. **SHARPNESS BENCHMARK**: Look at anti-aliasing. If text is sharp, diagonal text or icons may have minor smoothing. This is **PASS**.
-5. **STATUS LOCK (ABSOLUTE)**: If you use the remark "Review ratings are not present as the rating in the data is null or 0" or "Social platform icon is not present as the data is null", you MUST mark the status as **PASS**.
+5. **STATUS LOCK (ABSOLUTE)**: If you use the remark "Review ratings are not present as the rating in the data is null or 0" or "Social platform icon is not present as the data is null", you MUST mark the status as **PASS**. If the platform slug is missing entirely for all visible reviews, you MUST mark the status as **Not Applicable**.
 6. **PROOF-ID MANDATE (CRITICAL)**: You are FORBIDDEN from outputting literal "XXXX", "YYYY", or "N/A" if a matching record exists in SECTION 0. You MUST find the actual \`id\` and \`platform\`.
    - **Identity Mapping Log**: Your reasoning MUST begin with a map: "Pixel [AN] -> ID:33769".
    - **System Failure**: Using placeholders will result in an immediate rejection.
@@ -243,14 +275,14 @@ ${isMultiImage ? `
 🚨 CORE VALIDATION RULES (IRON LOCK) 🚨
 ============================================================
 
-**RULE 1: THE FORENSIC DETAIL MANDATE (ZERO TOLERANCE)**
-- **THE MICRO-TEXTURE HANDSHAKE**: You are PROHIBITED from reporting a PASS for sharpness unless you can prove **1px Micro-Texture Presence**.
-    - **Digital Benchmark**: The Name/Role text has razor-sharp 1px edges.
-    - **Forensic Proof**: Look for the thinnest possible detail in the image (eyelashes, individual hair strands, 1px logo grain).
-    - **THE "SMOOTHNESS" FAIL**: If an image looks "smooth", "clean", or "creamy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
-- **THE CLOUD-TRIGGER**: If an image matches the **LEFT SIDE** of the benchmark samples (Watercolor/Cloud effect), it is an absolute FAIL.
-- **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
-- **HALLUCINATION BLOCK**: Do not "repair" the image in your mind. If you cannot see razor-sharp grain matching the 'l' in the name, it is a FAIL.
+**RULE 1: THE FORENSIC DETAIL MANDATE (PIXELATION & UPSCALING)**
+- **THE JAGGED SCAN**: Audit for "Step-laddering" (stair-step edges) on curved elements.
+- **THE BLOCK SCAN**: Audit skin for "Macro-blocking" (square blocks of color).
+- **THE EYE SCAN**: Audit eyes for iris/pupil separation. If smudged, it is low-res.
+- **MICRO-TEXTURE**: Prove **1px Micro-Texture Presence** (eyelashes, hair, grain).
+- **THE "SMOOTHNESS" FAIL**: "Creamy" but textureless images are clinical defects (**INTERPOLATION BLUR**).
+- **SYSTEM VERDICT**: Any image softer than the vector text is a defect. Use **FAIL_SHARP_AVATAR**, **FAIL_SHARP_MEDIA**, or **FAIL_SHARP_BLURRY**.
+- **HALLUCINATION BLOCK**: If you cannot see razor-sharp grain matching the 'l' in the name, it is a FAIL.
 - **Triggers**: Categories D (Avatar Rendering) and E (Media & Images)
 
 **RULE 2: EDGE INTEGRITY (Card Clipping & Containment)**
@@ -340,36 +372,38 @@ ${isMultiImage ? `
 - **SIGNATURES**: Supports Stars, Numerical badges, Tacos, Hearts, Dots.
 - **DOM_TRUTH**: If Section -1 shows detection, you MUST report Visible.
 
-**RULE 13: SOCIAL PLATFORM ICON (POSITION LOCK)**
-- **CONFIG INDEPENDENCE (CRITICAL)**: You MUST report "Visible" if you see a Facebook, Google, Yelp, or Brand logo in the Top-Right, **EVEN IF** SECTION 0 says "Manual" or "N/A" and Config says "Absent".
-- **THE GOOGLE SIGNAL**: Look specifically for the 4-color 'G' insignia or a monochromatic brand badge anchored in the Top-Right.
-- **LOCATION**: Top-Right corner of the review card boundary ONLY.
-- **LEFT-SIDE PROHIBITION**: Do NOT use the top-left Feedspace "F" logo to satisfy Rule 13.
+**RULE 13: SOCIAL PLATFORM ICON (BRAND IDENTITY INVENTORY)**
+============================================================
+- **MANDATORY INVENTORY**: You are PROHIBITED from reporting "Visible" using general terms. You MUST explicitly name the visible BRAND (e.g., "Google 'G' logo", "LinkedIn 'in' logo", "Trustpilot star badge", "Facebook 'f'").
+- **BRAND-FAIL (CRITICAL)**: If you see a review card where the top-right corner is empty or contains only generic shapes with no branded logo, YOU MUST report status: **FAIL**.
+- **LOCATION LOCK**: Audit ONLY the top-right corner of the review card boundary.
+- **LITERAL EYE**: If SECTION 0 says Google but you see no logo, Rule 13 mandates a **FAIL**. Config presence does NOT satisfy visual visibility.
 
-**RULE 14: DATE VALIDATION (STRICT-FORMAT Mandate)**
+**RULE 14: DATE VALIDATION (SCREENSHOT-ONLY Mandate)**
+============================================================
+- **DATA-BLINDNESS MANDATE (CRITICAL)**: You are FORBIDDEN from using \`feeds_data\` or \`review_at\` values from Section 0 to audit date formats. You MUST audit ONLY what is physically painted on the screenshot pixels.
 - **FORMAT REQUIREMENT**: Must match "Month DD, YYYY" (e.g., "Jan 10, 2024" or "January 10, 2024").
-- **COMPONENTS**: Must contain (1) Month Name (3-letter or full), (2) Day Number, (3) Comma, and (4) 4-digit Year.
+- **COMPONENTS**: Must contain (1) Month Name, (2) Day Number, (3) Comma, and (4) 4-digit Year.
 - **LOCATION (MANDATORY)**: The date MUST be anchored in the **absolute bottom-left corner** of the review card boundary.
 - **FORBIDDEN (REPORT AS ABSENT)**: "Month Year" (e.g., "October 2025"), "MM/DD/YYYY", or any format missing the day, comma, or positioned anywhere other than the bottom-left. 
 - **LITERAL TRUTH**: If you see a date that does NOT match this exact format or location, you MUST report UI Status: **Absent**.
 - **REGRESSION LOCK (CRITICAL)**: If "Show Review Date" is reported as **Visible** in the UI but the **Config Status** is **Absent**, you MUST report Verdict: **FAIL** and trigger the token **VIOLATION: Product Regression**.
 - **Triggers**: Category C (Text) or Category G (Date check).
+- **PASS/FAIL HYGIENE**: 
+    - If a date is physically **ABSENT** from the screenshot, you are PROHIBITED from flagging Category C as FAIL for "Incorrect Format". If it's not there, formatting is irrelevant.
+    - Only trigger **FAIL_DATE_RULE14** if you can physically see a date string in the pixels but it violates the components (e.g., missing comma, missing day).
 
 **RULE 15: THIRD-PARTY INTERFERENCE (COLLISION LOCK)**
 - **THE COLLISION-FAIL**: Audit for NON-Feedspace elements (e.g., WhatsApp Bubbles, Accessibility "Key" Icons, GDPR Banners, Chat Tabs) overlapping the widget.
 - **ZERO TOLERANCE**: If a third-party icon covers even 1px of a Feedspace card, logo, or text, it is an absolute **FAIL Category B**.
 - **MANDATORY TOKEN**: Use the exact token **FAIL_ELEMENT_OVERLAP**.
 - **Triggers**: Category B (Element Containment).
-- **PASS CRITERIA**: If the formatted date is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
-- **STRICT FAIL**: FAIL if the format is "Month Year" (missing the Day) or missing the comma.
-- **MANDATORY TRIGGER**: If the day number or comma is missing, you MUST use the token **FAIL_DATE_RULE14**.
-- **RELIABILITY LOCK**: If the format matches the gold standard, you are PROHIBITED from flagging it as FAIL.
 
-**RULE 15: BRANDING & LOGO AUDIT**
+**RULE 16: BRANDING & LOGO AUDIT**
 - **SIGNATURE**: White pill badge ("Capture reviews with Feedspace" + ⚡).
 - **LOCATION**: Bottom center/right of widget (Exceptions: Toast/Cross - Popup only).
 
-**RULE 16: TEXT CORRUPTION & STUTTERING**
+**RULE 17: TEXT CORRUPTION & STUTTERING**
 - **DEFECT**: Duplicated labels (e.g., "ReviewsReviews").
 - **FAIL**: If any label is layered on top of itself.
 
@@ -390,13 +424,14 @@ ${isMultiImage ? `
 - **SIGNATURES**: 
     - **TYPE A (STARS)**: Single or Repetitive star icons (any color).
     - **TYPE B (NUMERICAL)**: Numbers (e.g., "10", "9.33") in colored badges/circles/boxes.
-    - **TYPE C (CUSTOM)**: Repetitive icons like **Tacos**, Hearts, or Dots.
+    - **TYPE C (CUSTOM)**: Repetitive icons like **Tacos**, Hearts, Dots.
 - **COLOR**: Any color (Yellow, Green, Purple, Blue, etc.) is valid.
 - **DOM_TRUTH**: If SECTION -1 shows a detection (e.g., "STARS + NUMERICAL"), you MUST report Visible.
 
-**RULE 13: SOCIAL PLATFORM ICON (ANY ICON/COLOR)**
+**RULE 13: SOCIAL PLATFORM ICON (BRAND IDENTITY INVENTORY)**
 - **PASS CRITERIA**: If a platform icon or brand logo is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
-- **SIGNATURES**: Logos (Google, Fresha) or small circular/square brand icons in the top-right corner. Any color is valid.
+- **MANDATORY BRAND CHECK**: You MUST name the platform (e.g., "I see the Google 'G' icon"). If the corner is empty, mark it **Absent** and **FAIL** the category.
+- **SIGNATURES**: Logos (Google, Fresha) or small circular/square brand icons in the top-right corner.
 `;
 
     // ============================================================
@@ -432,6 +467,7 @@ ${geometricWarnings.map(w => `- ${w}`).join('\n')}
 - "OVERBLEED" or "CLIPPED" → Apply RULE 2 → FAIL Categories A & B
 - "TEXT TRUNCATION" → Apply RULE 3 → FAIL Categories A & C
 - "LAYOUT OVERLAP" → Apply RULE 2 → FAIL Categories A & B
+- "SYMMETRY_SIGNAL" → **ALERT: THIS IS A GEOMETRIC SUGGESTION ONLY**. The system detected a width delta or sharp edge. However, you MUST prioritize your EYES. If you visually see rounded corners and complete text/avatars, you MUST mark Category A as **PASS**. Only fail if content is physically missing or truncated.
 - "STAR RATING VISIBLE" → MUST report "Visible" for "Show Star Ratings"
 - "CROSS BAR DETECTED" → **ALERT: THIS DOM-BASED SIGNAL IS FREQUENTLY A FALSE POSITIVE**. The engine confirmed CSS rendering for two tracks (L2R/R2L) but NOT necessarily the presence of content. You are PROHIBITED from marking "Visible" unless you can VISUALLY identify and name reviewers from BOTH intersecting tracks. If you only see content on ONE track, the system signal reflects a background layout shape—report "ABSENT" and trust your eyes over the system.
 ============================================================
@@ -479,7 +515,7 @@ Q5. Platform icons in popup top-right? → [VISIBLE / MISSING]
 
 **FAILURE TRIGGERS:**
 - Q1 SLICED → Apply RULE 2 → FAIL Category A
-- Apply RULE 1 (Sharpness) to all visible images
+- **SHARPNESS**: Apply RULE 1. Note: Tiny social icons and edge reviews may appear soft due to design fading—this is a **PASS** (Use **PASS_FORCE_SHARP**).
 - Q3 "NONE" (if config expects Visible) → FAIL feature
 - Q4 MISSING (if config expects Visible) → FAIL feature`,
 
@@ -554,7 +590,7 @@ Q3. Content parity across scrolling cards? → [CONSISTENT / MISMATCHED]
 **FAILURE TRIGGERS:**
 - Q1 SOME PARTIAL or Q2 INCONSISTENT → Apply RULE 2 → FAIL Category A
 - Q3 MISMATCHED → FAIL Category A
-- Apply RULE 1 (Sharpness) to all visible images`,
+- **SHARPNESS**: Apply RULE 1. **ZERO TOLERANCE**: Central reviews MUST be razor-sharp. Benchmark the image texture against the text. If text is 1px sharp but image iris/skin is soft/muddy → **FAIL_SHARP_BLURRY**. No exceptions.`,
 
       MARQUEE_LEFTRIGHT: `
 **MARQUEE_LEFTRIGHT — WIDGET-SPECIFIC CHECKS:**
@@ -565,7 +601,7 @@ Q3. Content parity across scrolling cards? → [CONSISTENT / MISMATCHED]
 **FAILURE TRIGGERS:**
 - Q1 SOME PARTIAL or Q2 INCONSISTENT → Apply RULE 2 → FAIL Category A
 - Q3 MISMATCHED → FAIL Category A
-- Apply RULE 1 (Sharpness) to all visible images`,
+- **SHARPNESS**: Apply RULE 1. **ZERO TOLERANCE**: Central reviews MUST be razor-sharp. Benchmark the image texture against the text. If text is 1px sharp but image iris/skin is soft/muddy → **FAIL_SHARP_BLURRY**. No exceptions.`,
 
       CAROUSEL_SLIDER: `
 **CAROUSEL_SLIDER — WIDGET-SPECIFIC CHECKS:**
@@ -577,6 +613,7 @@ Q4. **DATE FORMAT**: Strict "Month DD, YYYY" in cards? → [VISIBLE / ABSENT]
 **FAILURE TRIGGERS:**
 - Q1 CHOPPED → Apply RULE 2 → FAIL Category A
 - Q2 SOME PARTIAL or Q3 NARROW-CLIPPED → Apply RULE 2 → FAIL Category A
+- **NOTE**: Navigation arrows touching the edge or overlapping card backgrounds are **PASS** as long as they don't block text (Rule 18.A).
 - Apply RULE 1 (Sharpness) to all visible images`,
 
       CROSS_SLIDER: `
@@ -671,21 +708,20 @@ Q4. **DATE AUDIT**: Grey date text visible? Apply RULE 14.
 
 **D. AVATAR RENDERING**
 - Apply RULE 1 (Sharpness), RULE 9 (Identifiers), and RULE 11 (Skeletons)
-Q1. **SKELETON CHECK**: Are avatars rendered as vibrating gray circles or blocks?
-    - If YES, look up Section 0 ID. If rating is null → [SKELETON_PASS_FORCE].
-    - If NO → [ACTUAL AVATARS].
-Q2. Any photo looks distorted or has muddy edges? → [NO / YES—specify card]
-Q3. **MANDATORY REVIEWER AUDIT LOG (PER-CARD ANALYSIS)**:
-    - You MUST list every unique name found and their sharpness/truncation status.
-    - Format: "[Name]: [Initial/Photo] Sharpness Log (Text 1px/Img Xpx) | Truncation (FAIL/PASS)"
-    - **CRITICAL**: Apply Rule 1 (>1.1px = FAIL) to EVERY name listed. If failing, use token **FAIL_SHARP_AVATAR**.
-Q4. Avatar sizes consistent across cards? → [CONSISTENT / INCONSISTENT]
+Q1. **SKELETON CHECK**: Are avatars rendered as vibrating gray circles? → [SKELETON_PASS_FORCE / ACTUAL AVATARS].
+Q2. **MANDATORY FORENSIC QUALITY INVENTORY (MFQI - PIXEL SKEPTIC)**:
+    - **THE RAZOR COMPARISON (IRON LOCK)**: You are PROHIBITED from reporting 'Sharp' based on overall appearance. You MUST benchmark the avatar pixels against the razor-sharp vector text (the review name).
+    - **TEXTURE DELTA (MANDATORY)**: State the edge width of a text character (usually 1px) and the edge width of the avatar details (eyes/nose/hair).
+    - **FAIL TRIGGER**: If Avatar Edge Width > Text Edge Width (e.g., text is 1px but avatar is 3px fuzzy), trigger **FAIL_SHARP_BLURRY**.
+    - **LOG FORMAT**: "[Name/ID] | TextEdge: 1px | AvatarDetail: [X]px | Delta: [DIFF]px | Texture: [Grainy/Razor/Muddy/Watercolor] | Verdict"
+    - **PROOF MANDATE**: You MUST describe a micro-feature (e.g., "I see individual hair strands" or "Faces are mud-blobs with no iris separation").
+Q3. **PHOTO-SMEAR SCAN**: Any face looks like a watercolor painting or smudge? → [FAIL / PASS]
 
-Q3. **SHARPNESS BENCHMARK (MANDATORY)**: 
-    - Apply the **ADAPTIVE RESOLUTION LOCK** (Rule 1).
-    - Compare logo/media image to current page text.
-    - **FORENSIC PROOF**: You are FORBIDDEN from reporting 'SHARP' unless you can describe the texture: (e.g., 'I can see 1px razor edges on the logo grain' or 'Text anti-aliasing is crisp').
-    - Does image show interpolation blur or 'Watercolor/Cloud' effect compared to text? → [Passing - SHARP / Failing - **FAIL_SHARP_MEDIA**]
+Q3. **SHARPNESS BENCHMARK (FORENSIC OVERRIDE)**: 
+    - Apply the **PIXELATION & UPSCALING MANDATE** (Rule 1.A).
+    - **FORENSIC PROOF**: You are FORBIDDEN from reporting 'SHARP' unless you name the texture (e.g., 'I can see 1px razor edges on the iris/pupil').
+    - Does image show "Macro-blocking" or "Step-laddering" artifacts? → [Passing - SHARP / Failing - **FAIL_SHARP_MEDIA**]
+    - **Audit Failure State**: If Image Detail > 1.1px, mark category as **FAIL**. 
     - **If no images**: → "Passing - SHARP (N/A)"
 Q4. All media fully visible within container? → [FULLY VISIBLE / PARTIALLY HIDDEN]
 
@@ -696,22 +732,16 @@ Q2. Theme consistency (preview vs popup)? → [SAME THEME / MISMATCHED / NO POPU
 Q3. Interactive elements (buttons/links/arrows) clearly visible? → [YES / NO]
 
 **G. POPUPS & MODALS**
-- Apply RULE 7 (Popup Validation)
+- **VISUAL MANDATE**: A complete UI component MUST sit inside the background.
+- **THE "AIR" AUDIT**: Can you see at least 10px of breathing room below the card?
 
-**CRITICAL PRE-CHECK (Answer FIRST):**
-STEP 1: **POPUP EXISTENCE & FOOTER AUDIT**
-- Can you see ANY card overlaid on the widget (Skeleton bars, whole text, or just a footer)? → [YES / NO]
-- **MANDATORY TRANSCRIPTION**: If YES, you MUST quote the following from the pixels:
-    - Current Date in footer: → ["Text" / "ABSENT"]
-    - "Read More" link: → ["Text" / "ABSENT"]
-- **STRICT LOGIC BRIDGE**: If you identified "ACTUAL_BAR_FAILURE" in Q1, or if you can see a Date/Read More, you are **PROHIBITED** from saying NO here. The answer is **MANDATORY YES**.
-- If NO (Truly no popup in ANY screenshot): Mark Category G PASS (N/A), skip to next category.
+STEP 1: **POPUP EXISTENCE & ICON AUDIT**
+- Can you see ANY card overlaid on the widget? If NO, mark N/A.
+- **SOCIAL PLATFORM ICON**: Can you see the platform logo NEXT to the reviewer's name? -> [Visible / Absent]
 
-STEP 2: If YES—**BOTTOM EDGE TRUNCATION TEST**:
-- Is "Review Card Border" or "Shadow" enabled in config? → [YES / NO]
-- If NO (Borderless): Is any character of the date or body text actually sliced/half-cut? → [YES-FAIL / NO-PASS]
-- If YES (Bordered): Can you see complete rounded bottom border with padding below? → [YES-PASS / NO-FAIL]
-- Visual verdict: → [✓ PASS: Clean content/border / ✗ FAIL: Sliced content/missing border]
+STEP 2: **BOTTOM EDGE & TEXT SLICING TEST**:
+- Is any line of text sliced horizontally (half-visible)? → [YES: FAIL / NO: PASS]
+- Is the card bottom border/shadow visible? → [✓ PASS / ✗ FAIL]
 
 STEP 3: If STEP 2 passed—Additional checks:
 Q1. Popup fully visible at ALL edges? → [FULLY VISIBLE / SLICED—specify which edge]
@@ -734,6 +764,14 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 ============================================================
 
 **AVATAR_GROUP:**
+- **ROW INTEGRITY AUDIT (MANDATORY)**: Audit the rightmost avatar circle.
+    - **SECTOR ARC DESCRIPTION**: State: "The right edge of the last avatar is [Rounded Curve / Straight Vertical Edge]."
+    - **CLIPPING VERDICT**: If 'Straight', trigger Rule 18.B **FAIL_LAYOUT_CLIPPED**.
+- **VERTICAL COLLISION AUDIT**: Apply RULE 21.
+    - **OVERLAP CHECK**: Do stars touch the letters below? → [SPACED_PASS / **FAIL_LAYOUT_BLOCKED**].
+- **FULL LABEL TRANSCRIPTION (MANDATORY)**: Transcribe the ENTIRE text label below the avatars.
+    - **DUPLICATION BUG**: If you see "Trusted...Trusted" or stuttering, trigger **FAIL_TEXT_TRUNCATED**.
+- **EXPANDED POPUP AUDIT**: Apply RULE 22. If bottom border is not visible with whitespace below it, trigger **FAIL_LAYOUT_CLIPPED**.
 - **STAR RATING AUDIT**: Apply RULE 12 in TWO places: Aggregate (Below "Loved & Trusted...") and Popups.
 - **Show Social Platform Icon**: Apply RULE 13 (TOP RIGHT of popup).
 - **Read More**: Apply RULE 5—if config show_full_review=0, look for link in popup text
@@ -978,7 +1016,7 @@ Provide mandatory audit trace (chain of thought) as text preamble, then return R
     },
     {
       "category": "B. ELEMENT CONTAINMENT",
-      "issue": "[Required format as above]",
+      "issue": "MANDATE: For Carousel/Slider, ignore Arrow overlap on background space unless it blocks text/ratings per Rule 18.A.",
       "severity": "CRITICAL/HIGH/MEDIUM/LOW/N/A",
       "status": "PASS/FAIL"
     },

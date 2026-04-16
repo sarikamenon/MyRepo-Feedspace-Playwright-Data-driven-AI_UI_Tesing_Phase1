@@ -8,205 +8,224 @@ class AvatarCarouselHelper {
         const discoveryTempId = 'fs_root_' + Math.random().toString(36).substr(2, 9);
         await widgetLocator.evaluate((el, id) => el.setAttribute('data-fs-discovery-root', id), discoveryTempId);
 
-        const widgetRoot = await widgetLocator.evaluateHandle(el => {
-            if (el.shadowRoot) return el.shadowRoot;
-            if (el.querySelector('.feedspace-avatar-carousel, .feedspace-avatar-carousel-item')) return el;
-            return el.parentElement;
-        });
-
-        // 2. Capture 'avatars' screenshot using Clip
-        try {
-            console.log('[AvatarCarouselHelper] Determining clip region for focused screenshot...');
-            await widgetLocator.scrollIntoViewIfNeeded({ timeout: 3000 });
-
-            const box = await widgetLocator.boundingBox();
-            if (box) {
-                const clip = {
-                    x: Math.max(0, box.x - 100), // More left padding
-                    y: Math.max(0, box.y - 100), // More top padding
-                    width: box.width + 200,      // More width for right edge visibility
-                    height: box.height + 200     // More height for bottom visibility
-                };
-                console.log(`[AvatarCarouselHelper] Taking clipped screenshot: ${JSON.stringify(clip)}`);
-                const buffer = await page.screenshot({ clip, animations: 'disabled' }).catch(() => null);
-                if (buffer) {
-                    screenshotBuffers.push(buffer);
-                    console.log('[AvatarCarouselHelper] Aggregate/Avatar focused shot captured.');
-                }
-            }
-        } catch (e) {
-            console.warn(`[AvatarCarouselHelper] Clip screenshot failed: ${e.message}`);
-        }
-
-        // 3. Find Avatars (Shadow DFS)
-        const avatarSelectors = [
-            '.feedspace-avatar-carousel-item',
-            '.feedspace-avatar-carousel',
-            '.feedspace-avatar',
-            '.fe-avatar-box',
-            '.fe-avatar',
-            '[class*="avatar-item"]',
-            'div:has(.feedspace-initials)'
+        // ── 🕵️ THE UNIVERSAL- "LAYOUT OVERLAP" → Apply RULE 2 → FAIL Categories A & B
+        // - "SYMMETRY_SIGNAL" → **ALERT: THIS IS A GEOMETRIC SUGGESTION ONLY**. The system detected a width delta or sharp edge. However, you MUST prioritize your EYES. If you visually see rounded corners and complete text/avatars, you MUST mark Category A as **PASS**. Only fail if content is physically missing or truncated.
+        // - "STAR RATING VISIBLE" → MUST report "Visible" for "Show Star Ratings"
+        // on AND avatar clicking simultaneously
+        const nextArrowSelectors = [
+            'button.feedspace-carousel-next', '.swiper-button-next', '.fe-arrow-next', 
+            '.fe-carousel-next', '[class*="arrow-right"]', '[class*="next-button"]'
+        ];
+        
+        const itemSelectors = [
+            '.feedspace-avatar-card-flip', '.feedspace-avatar-carousel-item', 
+            '.fe-avatar-item', '[class*="avatar-card"]'
         ];
 
-        const avatars = await page.evaluate(async ({ tempId, selectors }) => {
-            const root = document.querySelector(`[data-fs-discovery-root="${tempId}"]`) ||
-                Array.from(document.querySelectorAll('*'))
-                    .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`))
-                    ?.shadowRoot.querySelector(`[data-fs-discovery-root="${tempId}"]`);
+        console.log('[AvatarCarouselHelper] Initializing Iterative Multi-State Storyboard Audit...');
 
-            if (!root) return [];
+        for (let slide = 1; slide <= 3; slide++) {
+            console.log(`[AvatarCarouselHelper] --- Auditing Slide ${slide} ---`);
 
-            const results = [];
-            const visited = new Set();
+            // 1. Audit ALL visible cards for clipping (Sentinel)
+            const sentinelResults = await page.evaluate(({selList, vw, vh}) => {
+                const results = [];
+                function findDeep(selectors) {
+                    const found = [];
+                    const scan = (root) => {
+                        if (!root) return;
+                        selectors.forEach(s => {
+                            root.querySelectorAll(s).forEach(el => {
+                                if (el.getBoundingClientRect().width > 10) found.push(el);
+                            });
+                        });
+                        Array.from(root.children || []).forEach(c => scan(c));
+                        if (root.shadowRoot) scan(root.shadowRoot);
+                    };
+                    scan(document);
+                    return found;
+                }
+                
+                const cards = findDeep(selList);
+                cards.forEach((card, idx) => {
+                    const r = card.getBoundingClientRect();
+                    const style = window.getComputedStyle(card);
+                    const trRadius = parseFloat(style.borderTopRightRadius) || 0;
+                    
+                    // 🛡️ ON-STAGE BUFFER: Audit any card that is meaningfully visible
+                    const isOnStage = (r.right > 20 && r.left < (vw - 20) && r.bottom > 0 && r.top < vh);
+                    
+                    if (isOnStage) {
+                        const distToBottom = vh - r.bottom;
+                        const distToTop = r.top;
 
-            const findInRoot = (node) => {
-                if (!node) return;
+                        // 1. Vertical Clipping (Zero-Tolerance)
+                        if (distToBottom < -1) results.push(`FAIL_BOTTOM_EDGE_CLIPPED (Card ${idx+1}, Bleed: ${Math.abs(Math.round(distToBottom))}px)`);
+                        else if (distToTop < -1) results.push(`FAIL_TOP_EDGE_CLIPPED (Card ${idx+1}, Bleed: ${Math.abs(Math.round(distToTop))}px)`);
 
-                selectors.forEach(s => {
-                    try {
-                        const matches = node.querySelectorAll(s);
-                        matches.forEach(m => {
-                            if (!visited.has(m)) {
-                                visited.add(m);
-                                const box = m.getBoundingClientRect();
-                                if (box.width > 0 && box.height > 0) {
-                                    let id = m.getAttribute('data-fs-temp-id');
-                                    if (!id) {
-                                        id = 'fs_avatar_' + Math.random().toString(36).substr(2, 9);
-                                        m.setAttribute('data-fs-temp-id', id);
-                                    }
-                                    results.push({ id, feedId: m.getAttribute('data-feed-id') });
+                        // 🛡️ SYMMETRY AUDIT (End-Cap Audit)
+                        const isEndCard = (r.right > vw - 15) || (r.left < 15);
+                        const centerCardWidth = cards.length > 1 ? cards[Math.floor(cards.length/2)].getBoundingClientRect().width : r.width;
+                        const widthDelta = Math.abs(centerCardWidth - r.width);
+
+                        // Soften threshold to 20px (allow for standard swiper peeking/scaling)
+                        if (isEndCard && widthDelta > 20) {
+                            results.push(`SYMMETRY_SIGNAL: Width Delta ${Math.round(widthDelta)}px detected on Card ${idx+1}. (Visual Audit Mandatory)`);
+                        }
+
+                        if (isEndCard && trRadius < 2) {
+                            results.push(`SYMMETRY_SIGNAL: Sharp corner detected on Card ${idx+1}. (Visual Audit Mandatory)`);
+                        }
+                    }
+                });
+                return results;
+            }, { selList: itemSelectors, vw: page.viewportSize().width, vh: page.viewportSize().height });
+
+            if (sentinelResults.length > 0) {
+                sentinelResults.forEach(msg => {
+                    const level = msg.includes('FAIL_') ? 'FAIL_LAYOUT_CLIPPED' : 'AUDIT_SIGNAL';
+                    console.log(`[SYSTEM ALERT] TRUTH DATA: ${level} detected on Slide ${slide}. Issue: ${msg}`);
+                    if (geometricWarnings) geometricWarnings.push(`${level}: ${msg}`);
+                });
+            }
+
+            // 2. Capture Slide Screenshot
+            const slideShot = await page.screenshot({ animations: 'disabled' }).catch(() => null);
+            if (slideShot) screenshotBuffers.push(slideShot);
+
+            // 3. Click 1 Avatar on this slide (Optimized from 2 to 1 for speed)
+            const visibleAvatars = await page.evaluate(({selList, vw}) => {
+                const found = [];
+                function scan(root) {
+                    if (!root) return;
+                    selList.forEach(s => {
+                        root.querySelectorAll(s).forEach(el => {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 10 && r.right > 0 && r.left < vw) {
+                                let id = el.getAttribute('data-fs-temp-id');
+                                if (!id) {
+                                    id = 'fs_item_' + Math.random().toString(36).substr(2, 9);
+                                    el.setAttribute('data-fs-temp-id', id);
                                 }
+                                found.push(id);
                             }
                         });
-                    } catch (e) { }
-                });
-
-                Array.from(node.children || []).forEach(child => {
-                    findInRoot(child);
-                    if (child.shadowRoot) findInRoot(child.shadowRoot);
-                });
-            };
-
-            findInRoot(root);
-            if (root.shadowRoot) findInRoot(root.shadowRoot);
-
-            return results;
-        }, { tempId: discoveryTempId, selectors: avatarSelectors });
-
-        console.log(`[AvatarCarouselHelper] Found ${avatars.length} avatars in Shadow/DOM.`);
-
-        // 3.5 Explicitly Hover the Rightmost Visible Avatar to check for edge clipping
-        console.log(`[AvatarCarouselHelper] Locating rightmost visible avatar using raw JS geometry...`);
-        let rightmostAvatarId = await page.evaluate((ids) => {
-            let maxRight = -1;
-            let target = null;
-            ids.forEach(id => {
-                const el = document.querySelector(`[data-fs-temp-id="${id}"]`) ||
-                    Array.from(document.querySelectorAll('*'))
-                        .find(n => n.shadowRoot && n.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`))
-                        ?.shadowRoot.querySelector(`[data-fs-temp-id="${id}"]`);
-                if (el) {
-                    const rect = el.getBoundingClientRect();
-                    // Ensure the element is visible on screen and further right than previous
-                    if (rect.width > 0 && rect.right > maxRight && rect.left < window.innerWidth) {
-                        maxRight = rect.right;
-                        target = id;
-                    }
+                    });
+                    Array.from(root.children || []).forEach(c => scan(c));
+                    if (root.shadowRoot) scan(root.shadowRoot);
                 }
-            });
-            return target;
-        }, avatars.map(a => a.id));
+                scan(document);
+                return found;
+            }, { selList: itemSelectors, vw: page.viewportSize().width });
 
-        if (rightmostAvatarId) {
-            console.log(`[AvatarCarouselHelper] Hovering rightmost avatar to trigger flip animation...`);
-            const loc = page.locator(`[data-fs-temp-id="${rightmostAvatarId}"]`);
-            await loc.scrollIntoViewIfNeeded();
-            await loc.hover({ force: true }).catch(e => console.warn('Hover fail:', e.message));
-            await page.waitForTimeout(2000); // 2 seconds for CSS flip transition
-            const hoverShot = await page.screenshot({ fullPage: false, animations: 'disabled' }).catch(() => null);
-            if (hoverShot) {
-                screenshotBuffers.push(hoverShot);
-                console.log(`[AvatarCarouselHelper] Rightmost avatar hover screenshot captured.`);
-            }
-        }
+            const toClick = visibleAvatars.slice(0, 1);
+            for (const avatarId of toClick) {
+                console.log(`[AvatarCarouselHelper] Hovering and Clicking avatar: ${avatarId}`);
+                
+                // 1. Mandatory Hover to trigger CSS animations/flips
+                await page.evaluate((id) => {
+                    const sel = `[data-fs-temp-id="${id}"]`;
+                    function find(root) {
+                        const el = root.querySelector(sel);
+                        if (el) return el;
+                        const children = Array.from(root.children || []);
+                        for (const c of children) {
+                            const found = find(c);
+                            if (found) return found;
+                            if (c.shadowRoot) {
+                                const shadow = find(c.shadowRoot);
+                                if (shadow) return shadow;
+                            }
+                        }
+                    }
+                    const target = find(document);
+                    if (target) {
+                        target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+                        target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                    }
+                }, avatarId);
 
-        // 4. Interact with up to 5 unique avatars
-        const seenFeedIds = new Set();
-        const uniqueAvatars = avatars.filter(a => {
-            if (!a.feedId) return true;
-            if (seenFeedIds.has(a.feedId)) return false;
-            seenFeedIds.add(a.feedId);
-            return true;
-        });
-
-        const targets = uniqueAvatars.slice(0, 5);
-
-        console.log(`[AvatarCarouselHelper] Selected ${targets.length} unique avatars for interaction.`);
-
-        for (let i = 0; i < targets.length; i++) {
-            const target = targets[i];
-            const selector = `[data-fs-temp-id="${target.id}"]`;
-
-            try {
-                console.log(`[AvatarCarouselHelper] Clicking unique avatar ${i + 1}/${targets.length} (ID: ${target.id})...`);
-
-                // 1. Hover first to trigger CSS flips
-                const loc = page.locator(selector).first();
-                await loc.scrollIntoViewIfNeeded();
-                await loc.hover({ force: true }).catch(() => { });
                 await page.waitForTimeout(1000);
 
-                // 2. Click using robust PointerEvents
-                await page.evaluate((sel) => {
-                    const el = document.querySelector(sel) ||
-                        Array.from(document.querySelectorAll('*'))
-                            .find(n => n.shadowRoot && n.shadowRoot.querySelector(sel))
-                            ?.shadowRoot.querySelector(sel);
-                    if (el) {
+                // 2. Robust Pointer + Mouse Click Dispatch
+                await page.evaluate((id) => {
+                    const sel = `[data-fs-temp-id="${id}"]`;
+                    function find(root) {
+                        const el = root.querySelector(sel);
+                        if (el) return el;
+                        const children = Array.from(root.children || []);
+                        for (const c of children) {
+                            const found = find(c);
+                            if (found) return found;
+                            if (c.shadowRoot) {
+                                const shadow = find(c.shadowRoot);
+                                if (shadow) return shadow;
+                            }
+                        }
+                    }
+                    const target = find(document);
+                    if (target) {
                         const eventOpts = { bubbles: true, cancelable: true, view: window };
-                        el.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
-                        el.dispatchEvent(new MouseEvent('mousedown', eventOpts));
-                        el.dispatchEvent(new PointerEvent('pointerup', eventOpts));
-                        el.dispatchEvent(new MouseEvent('mouseup', eventOpts));
-                        el.click();
+                        target.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
+                        target.dispatchEvent(new MouseEvent('mousedown', eventOpts));
+                        target.dispatchEvent(new PointerEvent('pointerup', eventOpts));
+                        target.dispatchEvent(new MouseEvent('mouseup', eventOpts));
+                        target.click();
                     }
-                }, selector);
+                }, avatarId);
+                
+                await page.waitForTimeout(1500); // 🏃 Optimized wait time
+                
+                // 📸 DEEP EXPANSION CAPTURE
+                const expansionShot = await page.evaluate((id) => {
+                    const modal = document.querySelector('.feedspace-modal, .fe-modal, [class*="modal"], [class*="popup"]');
+                    if (modal && modal.getBoundingClientRect().height > 50) return { type: 'MODAL', id: null };
+                    const cards = Array.from(document.querySelectorAll('*')).filter(n => n.getAttribute('data-fs-temp-id') === id);
+                    if (cards.length > 0) return { type: 'CARD', id: id };
+                    return null;
+                }, avatarId);
 
-                await page.waitForTimeout(2500);
-
-                console.log(`[AvatarCarouselHelper] Capturing viewport screenshot for review card ${i + 1}...`);
-
-                // Geometric Probe for "Flat Wall" Truncation
-                const truncationCheck = await page.evaluate(() => {
-                    const popup = document.querySelector('.feedspace-modal, .fe-modal, [class*="modal"], [class*="popup"]');
-                    if (popup) {
-                        const rect = popup.getBoundingClientRect();
-                        const distToBottom = window.innerHeight - rect.bottom;
-                        return {
-                            hasPopup: true,
-                            distToBottom,
-                            isTruncated: distToBottom < 5 // Within 5px of bottom is suspicious
-                        };
-                    }
-                    return { hasPopup: false };
-                });
-
-                if (truncationCheck.isTruncated) {
-                    const msg = `TRUTH DATA: Popup Truncation detected! (Flat Wall at bottom). Distance to bottom: ${truncationCheck.distToBottom}px.`;
-                    console.log(`[SYSTEM ALERT] ${msg}`);
-                    if (geometricWarnings) geometricWarnings.push(msg);
+                if (expansionShot) {
+                    // 📸 FULL VIEW EXPANSION CAPTURE (Requested for context)
+                    console.log(`[AvatarCarouselHelper] Capturing Full View for expansion: ${expansionShot.type}`);
+                    const buffer = await page.screenshot({ animations: 'disabled' }).catch(() => null);
+                    if (buffer) screenshotBuffers.push(buffer);
                 }
-
-                const shot = await page.screenshot({ fullPage: false, animations: 'disabled' }).catch(() => null);
-                if (shot) screenshotBuffers.push(shot);
-
+                
                 await page.mouse.click(50, 50);
-                await page.waitForTimeout(1000);
-            } catch (err) {
-                console.warn(`[AvatarCarouselHelper] Failed to interact with avatar ${i + 1}: ${err.message}`);
+                await page.waitForTimeout(800); // 🏃 Optimized wait time
             }
+
+            if (slide === 3) break;
+
+            // 4. Navigate to Next Slide
+            const arrowClicked = await page.evaluate((sels) => {
+                function findDeep(selectors) {
+                    let target = null;
+                    const scan = (root) => {
+                        if (target) return;
+                        selectors.forEach(s => {
+                            const el = root.querySelector(s);
+                            if (el && el.getBoundingClientRect().width > 0) target = el;
+                        });
+                        if (target) return;
+                        Array.from(root.children || []).forEach(c => {
+                            scan(c);
+                            if (c.shadowRoot) scan(c.shadowRoot);
+                        });
+                    };
+                    scan(document);
+                    return target;
+                }
+                const btn = findDeep(sels);
+                if (btn) {
+                    btn.click(); return true;
+                }
+                return false;
+            }, nextArrowSelectors);
+
+            if (!arrowClicked) break;
+            await page.waitForTimeout(1500); // 🏃 Optimized wait time
         }
 
         return screenshotBuffers;

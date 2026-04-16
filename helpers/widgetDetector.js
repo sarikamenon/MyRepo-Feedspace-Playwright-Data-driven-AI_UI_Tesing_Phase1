@@ -58,12 +58,12 @@ const CSS_SIGNATURES = [
     { classes: ['feedspace-vertical-scroll', 'feedspace-updown', 'vertical-marquee'], type: 'MARQUEE_UPDOWN' },
     { classes: ['fe-feedspace-avatar-group-widget-wrap', 'feedspace-avatar-group'], type: 'AVATAR_GROUP' },
     { classes: ['feedspace-carousel-widget', 'testimonial-slider', 'carousel_slider'], type: 'CAROUSEL_SLIDER' },
-    { classes: ['feedspace-marque-main-wrap', 'strip-slider'], type: 'MARQUEE_STRIPE' },
+    { classes: ['feedspace-marque-main-wrap', 'strip-slider', 'feedspace-strip-slider-widget'], type: 'MARQUEE_STRIPE' },
     { classes: ['feedspace-floating-widget', 'fe-floating-toast', 'fe-toast-card', 'fe-chat-bubble'], type: 'FLOATING_TOAST' },
     { classes: ['feedspace-element-horizontal-scroll-widget', 'feedspace-left-right-shadow'], type: 'MARQUEE_LEFTRIGHT' },
     { classes: ['feedspace-single-review-widget', 'single-slider', 'feedspace-single-slider'], type: 'SINGLE_SLIDER' },
     { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' },
-    { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider', 'feedspace-embed'], type: 'AVATAR_CAROUSEL' }
+    { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider'], type: 'AVATAR_CAROUSEL' }
 ];
 
 // ── VALID WIDGET TYPE IDs ────────────────────────────────────────────────────
