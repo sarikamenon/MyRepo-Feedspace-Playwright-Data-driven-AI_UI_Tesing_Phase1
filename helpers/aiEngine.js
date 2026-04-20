@@ -7,7 +7,7 @@ class AIEngine {
         this.apiKey = process.env.GEMINI_API_KEY;
         if (this.apiKey) {
             this.genAI = new GoogleGenerativeAI(this.apiKey);
-            this.model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+            this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
         } else {
             console.warn("[AIEngine] GEMINI_API_KEY is not set. AI validation will return mock data.");
         }
@@ -143,9 +143,16 @@ class AIEngine {
                     error.message.includes('ETIMEDOUT');
 
                 if ((isRetriable || isTransientFetch) && attempts <= this.maxRetries) {
-                    const delay = this.initialDelay * Math.pow(2, attempts - 1);
-                    const reason = isRetriable ? 'Service/Rate Limit (429/503)' : 'Transient network error';
-                    console.warn(`[AIEngine] ⚠️ ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempts}/${this.maxRetries})`);
+                    // For 429 errors, the Gemini quota (RPM) usually resets every 60 seconds.
+                    // We enforce a minimum 60s wait for 429s to ensure the quota is actually cleared.
+                    const isRateLimit = error.message.includes('429') || error.status === 429;
+                    const delay = isRateLimit 
+                        ? Math.max(60000, this.initialDelay * Math.pow(2, attempts - 1)) // Force 60s for 429
+                        : this.initialDelay * Math.pow(2, attempts - 1);
+
+                    const reason = isRateLimit ? 'Gemini Rate Limit (429)' : (isRetriable ? 'Service Unavailable (503)' : 'Transient network error');
+                    console.warn(`[AIEngine] 🚨 ${reason}. Quota exhausted? Waiting ${delay / 1000}s for reset... (Attempt ${attempts}/${this.maxRetries})`);
+                    
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
@@ -179,7 +186,36 @@ class AIEngine {
     }
 
     processResults(aiData, config, widgetType, staticFeatures, geometricWarnings) {
-        if (!aiData || !aiData.feature_results) return aiData;
+        if (!aiData) return null;
+
+        // Detect Empty State signal (Harden the detection)
+        const isEmptyState = (geometricWarnings || []).some(w => 
+            w.includes('EMPTY_STATE_FORCE_PASS') || 
+            w.toLowerCase().includes('zero reviews') ||
+            w.toLowerCase().includes('currently empty')
+        );
+
+        if (isEmptyState && aiData.feature_results) {
+            console.log(`[AIEngine] 🛡️ Empty State remediation engaged for ${widgetType}.`);
+            
+            const cardLevelFeatures = [
+                "Show Review Date", "Show Review Ratings", "Read More", 
+                "Show Social Platform Icon", "Review Image / Avatar", "Show Star Ratings"
+            ];
+
+            aiData.feature_results.forEach(res => {
+                const isCardFeature = cardLevelFeatures.includes(res.feature);
+                // If it's a card feature on an empty widget, force PASS (Empty State)
+                if (isCardFeature) {
+                    res.status = 'PASS (Empty State)';
+                    res.ui_status = 'Absent';
+                    res.issue = 'No visual defects detected (Empty State Pass)';
+                    res.remarks = 'Feature is absent because the widget contains zero review items. This is expected behavior for empty states.';
+                }
+            });
+        }
+
+        if (!aiData.feature_results) return aiData;
 
         // 1. Strict Filter: only include features defined in the config (staticFeatures)
         if (Array.isArray(staticFeatures) && staticFeatures.length > 0) {
@@ -480,9 +516,12 @@ class AIEngine {
                     let hasNullData = false;
 
                     if (isRatingTrait) {
-                        hasNullData = matchingFeed.rating === null ||
-                            matchingFeed.rating === 0 ||
-                            matchingFeed.rating === "0";
+                        const ratingValue = (matchingFeed.rating !== null && matchingFeed.rating !== undefined) ? matchingFeed.rating : matchingFeed.response;
+                        hasNullData = ratingValue === null ||
+                            ratingValue === 0 ||
+                            ratingValue === "0" ||
+                            ratingValue === undefined ||
+                            ratingValue === "";
                     } else if (isIconTrait) {
                         // FORCE DEFAULT: If show_platform_icon is missing from config, we assume it's OFF ('0')
                         const showIconConfig = config?.widget_customization?.show_platform_icon ?? "0";
@@ -519,6 +558,10 @@ class AIEngine {
                             console.log(`[AIEngine] 🛡️ Visibility Violation Detected for ${trait}. Preserving FAIL status.`);
                             f.issue = `Icon VIOLATION: Platform icon is visible in UI despite configuration being OFF. ${proofString}`;
                         } else {
+                            if (isVisibleInUI) {
+                                console.log(`[AIEngine] 🕵️ RASTER TRUTH: Data check confirms ${trait} should be Absent. Correcting UI Status.`);
+                                f.ui_status = "Absent";
+                            }
                             f.status = "PASS";
                             if (f.issue && !f.issue.includes("SKELETON_PASS_FORCE")) {
                                 f.issue = "No visual defects detected (Data-Driven Pass)";
@@ -532,13 +575,31 @@ class AIEngine {
             }
         });
 
+        // --- EMPTY STATE REMEDIATION ---
+        if (isEmptyState && aiData.feature_results) {
+            const cardLevelFeatures = [
+                "Show Review Date", "Show Review Ratings", "Read More", 
+                "Show Social Platform Icon", "Review Image / Avatar", "Show Star Ratings"
+            ];
+            
+            aiData.feature_results.forEach(f => {
+                const isCardFeature = cardLevelFeatures.includes(f.feature);
+                // If it failed because it was absent, but it's a card feature on an empty widget, force PASS
+                if (f.status === "FAIL" && f.ui_status === "Absent" && isCardFeature) {
+                    f.status = "PASS (Empty State)";
+                    f.issue = "No visual defects detected (Empty State Pass)";
+                    f.remarks = "Feature is absent because the widget contains zero reviews. This is expected behavior.";
+                }
+            });
+        }
+
         // 🛡️ TOTAL TRUTH OVERRIDE: Synchronize mathematical defects ONLY for confirmed FAILURES
         if (geometricWarnings && geometricWarnings.length > 0) {
-            // Strictly exclude SYMMETRY_SIGNAL which is an audit suggestion, not a hard failure.
             const clinicalDefects = geometricWarnings.filter(msg => 
                 (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') || 
                 msg.includes('PARTIAL') || msg.includes('CUT')) && 
-                !msg.includes('SYMMETRY_SIGNAL')
+                !msg.includes('SYMMETRY_SIGNAL') &&
+                !msg.includes('EMPTY_STATE_FORCE_PASS') // Never force FAIL based on empty state
             );
             
             if (clinicalDefects.length > 0) {

@@ -576,7 +576,7 @@ class PlaywrightHelper {
                     this.widgetType = 'CROSS_SLIDER';
                 }
             }
-            
+
             if (this.expectedType === 'FLOATING_TOAST') {
                 if (this.widgetType === 'AVATAR_CAROUSEL' || this.widgetType === 'AVATAR_GROUP') {
                     console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing FLOATING_TOAST identification. Mis-routing blocked for ${this.widgetType}.`);
@@ -699,53 +699,66 @@ class PlaywrightHelper {
             // This detects presence of elements buried in Shadow DOM to prevent AI hallucination and background interference.
             let domTruth = { iconsFound: false, starsFound: false, itemCount: 0 };
             if (locator) {
-                domTruth = await locator.evaluate(el => {
-                    const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
-                    const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon'];
-                    // Strict content selectors: Name, body text, or rating indicators
-                    const itemSels = [
-                        '.feedspace-card', '.fe-feed-item', '.review-card',
-                        '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
-                        '[data-feed-id]', '.fe-review-body', '.feedspace-body'
-                    ];
+                // 🛰️ CONTENT POLLING LOOP (Harden against Race Conditions)
+                // If we found the container but 0 items, we poll up to 5 times (10s total) 
+                // to give the widget content time to surface in the DOM.
+                let pollAttempts = 0;
+                const maxPolls = 5;
 
-                    const findDeep = (root, selectors) => {
-                        for (const sel of selectors) {
-                            if (root.querySelector(sel)) return true;
-                        }
-                        const children = [...root.querySelectorAll('*')];
-                        for (const child of children) {
-                            if (child.shadowRoot && findDeep(child.shadowRoot, selectors)) return true;
-                        }
-                        return false;
-                    };
+                while (pollAttempts < maxPolls) {
+                    pollAttempts++;
+                    domTruth = await locator.evaluate(el => {
+                        const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
+                        const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon'];
+                        const itemSels = [
+                            '.feedspace-card', '.fe-feed-item', '.review-card',
+                            '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
+                            '[data-feed-id]', '.fe-review-body', '.feedspace-body',
+                            '.carousel-item', '.fe-slick-slide', '.slick-slide'
+                        ];
 
-                    const countDeep = (root, selectors) => {
-                        let elements = [];
-                        for (const sel of selectors) {
-                            elements = elements.concat([...root.querySelectorAll(sel)]);
-                        }
-                        // Filter for uniqueness by element reference if possible, but easier to just count distinct tags/text
-                        let total = elements.length;
-                        const children = [...root.querySelectorAll('*')];
-                        for (const child of children) {
-                            if (child.shadowRoot) total += countDeep(child.shadowRoot, selectors);
-                        }
-                        return total;
-                    };
+                        const findDeep = (root, selectors) => {
+                            for (const sel of selectors) {
+                                if (root.querySelector(sel)) return true;
+                            }
+                            const children = [...root.querySelectorAll('*')];
+                            for (const child of children) {
+                                if (child.shadowRoot && findDeep(child.shadowRoot, selectors)) return true;
+                            }
+                            return false;
+                        };
 
-                    const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
-                    const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
-                    const itemCount = countDeep(el, itemSels) + (el.shadowRoot ? countDeep(el.shadowRoot, itemSels) : 0);
+                        const countDeep = (root, selectors) => {
+                            let total = 0;
+                            for (const sel of selectors) {
+                                total += root.querySelectorAll(sel).length;
+                            }
+                            const children = [...root.querySelectorAll('*')];
+                            for (const child of children) {
+                                if (child.shadowRoot) total += countDeep(child.shadowRoot, selectors);
+                            }
+                            return total;
+                        };
 
-                    return { iconsFound, starsFound, itemCount };
-                }).catch(() => ({ iconsFound: false, starsFound: false, itemCount: 0 }));
+                        const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
+                        const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
+                        const itemCount = countDeep(el, itemSels) + (el.shadowRoot ? countDeep(el.shadowRoot, itemSels) : 0);
+
+                        return { iconsFound, starsFound, itemCount };
+                    }).catch(() => ({ iconsFound: false, starsFound: false, itemCount: 0 }));
+
+                    if (domTruth.itemCount > 0) break;
+                    if (pollAttempts < maxPolls) {
+                        console.log(`[PlaywrightHelper] 🛰️  Content Poll ${pollAttempts}/${maxPolls}: 0 items found. Waiting 2s...`);
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
 
                 if (domTruth.itemCount === 0) {
-                    console.warn('[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE DETECTED. No review cards found.');
-                    this.geometricWarnings.push("EMPTY_STATE_FORCE_PASS: This widget is currently empty (Zero review items found in DOM). You are PROHIBITED from reporting layout failures on cards. Circular objects are Navigation Arrows, NOT review cards. Mark Feature categories as 'PASS (Empty State)' and Aesthetic categories as 'PASS'.");
+                    console.warn('[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE CONFIRMED. No review cards found after 10s polling.');
+                    this.geometricWarnings.push(`EMPTY_STATE_FORCE_PASS: This widget (${this.expectedType}) is currently empty with zero reviews. FORCE PASS all features that require cards (Ratings, Dates, Icons, Read More). This is NOT a failure.`);
                 } else {
-                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Found ${domTruth.itemCount} candidate item(s).`);
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Found ${domTruth.itemCount} item(s) after ${pollAttempts} poll(s).`);
                 }
 
                 if (domTruth.iconsFound) {
@@ -1065,7 +1078,7 @@ class PlaywrightHelper {
     async _handleLoadMoreLoop(context, screenshotBuffers = []) {
         const type = (this.widgetType || "").toUpperCase();
         const isSlider = type.includes('SLIDER') || type.includes('CAROUSEL') || type.includes('MARQUEE') || type.includes('TOAST');
-        
+
         if (isSlider) {
             console.log(`[PlaywrightHelper] Skipping "Load More" loop for ${type} widget.`);
             // Just capture the initial state for the storyboard
