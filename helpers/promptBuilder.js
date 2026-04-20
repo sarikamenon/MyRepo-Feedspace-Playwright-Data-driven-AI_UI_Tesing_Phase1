@@ -33,7 +33,7 @@ class PromptBuilder {
         const configKey = featureMap[featureName];
         if (!configKey) return false;
         const keys = Array.isArray(configKey) ? configKey : [configKey];
-        const lookupContexts = [config, config.widget_customization, config.data].filter(Boolean);
+        const lookupContexts = [config, config.widget_customization, config.data, config.widget_data].filter(Boolean);
         return keys.some(key => lookupContexts.some(ctx => key in ctx));
       }));
 
@@ -44,7 +44,7 @@ class PromptBuilder {
 
         if (configKey) {
           const keys = Array.isArray(configKey) ? configKey : [configKey];
-          const lookupContexts = [config, config.widget_customization, config.data].filter(Boolean);
+          const lookupContexts = [config, config.widget_customization, config.data, config.widget_data].filter(Boolean);
           const keyExists = keys.some(key => lookupContexts.some(ctx => key in ctx));
 
           if (keyExists) {
@@ -63,32 +63,17 @@ class PromptBuilder {
           }
         }
 
-        // --- DATA-AWARE OVERRIDE (GRANULAR RATING LOGIC) ---
-        if (expected === "Visible") {
-          const rawFeeds = config.feeds_data || config.data?.feeds_data || [];
-          if (rawFeeds.length > 0) {
-            if (featureName === "Show Review Ratings") {
-              const allQualifyForAbsent = rawFeeds.every(f => {
-                const hasNoRating = (f.rating === null || f.rating === 0 || f.rating === "0");
-                return hasNoRating;
-              });
-
-              if (allQualifyForAbsent) {
-                expected = "Absent (Data-Driven / Social Exception)";
-              }
-            } else if (featureName === "Show Social Platform Icon") {
-              const anySocial = rawFeeds.some(f => f.feed_type === "social_feed" || f.social_platform);
-              if (!anySocial) expected = "Absent (Data-Driven)";
-            }
-          }
-        }
+        // --- DATA-AWARE OVERRIDE (MOVED TO AI FORENSIC INSTRUCTIONS) ---
+        // We now keep the actual config state (Visible/Absent) and let the AI 
+        // perform a 'Data-Driven Pass' in Section 0 auditing to prevent reports 
+        // from masking the real configuration.
 
         return `- **${featureName}**: (Config Status: ${expected})`;
       })
       .join('\n');
 
     // Ground Truth Data (Limited to 20 for token efficiency)
-    const rawFeeds = config.feeds_data || config.data?.feeds_data || [];
+    const rawFeeds = config.feeds_data || config.data?.feeds_data || config.widget_data?.feeds_data || [];
     const feeds = rawFeeds.slice(0, 20).map(f => {
       let name = (f.app_user_name || f.reviewer_name || f.user_name || f.name || "Anonymous").toString().trim();
       if (!name) name = "Anonymous";
@@ -105,8 +90,9 @@ class PromptBuilder {
         user: name,
         initials: initials,
         text: f.comment?.substring(0, 100) || "N/A",
-        platform: f.social_platform?.name || f.social_platform || "Unknown",
-        rating: f.rating,
+        platform: f.social_platform?.name || (typeof f.social_platform === 'string' ? f.social_platform : "Unknown"),
+        slug: f.social_platform?.slug || (typeof f.social_platform === 'string' ? f.social_platform : "N/A"),
+        rating: (f.rating !== null && f.rating !== undefined) ? f.rating : f.response,
         feed_type: f.feed_type || "text_feed",
         url: f.display_review_url || f.review_url || "N/A",
         mapping_hint: `Match pixel initials '${initials}' or name '${name}' to ID: ${f.id}`
@@ -132,6 +118,7 @@ ${sensoryTruth}
 1. **MULTI-FAULT MANDATE**: You are PROHIBITED from stopping at the first defect. If an image is blurry AND the layout is clipped/overlapped, YOU MUST PROVIDE BOTH REASONS. A quality failure does not mask a layout failure.
 2. **ZERO TOLERANCE**: If Rule 0 or Rule 1 triggers, you are FORBIDDEN from reporting any Category as PASS. Mark ALL affected categories as FAIL.
 3. **DIFFERENTIAL TEXTURE AUDIT (MANDATORY)**: Compare the pixel-texture of every image/avatar against the razor-sharp vector edges of the text (Name/Job Role). If the image looks "muddy", "soft", or "watercolor-like" compared to the crisp text characters, YOU MUST report status: **FAIL** and trigger the token **FAIL_SHARP_BLURRY**.
+4. **RASTER TRUTH MANDATE (CRITICAL)**: You are FORBIDDEN from reporting UI Status as 'Visible' for any element you cannot see in the pixels. If Config is 'Visible' but Data is 'null/NA', you MUST report **UI Status: Absent** and **Verdict: PASS**. Never hallucinate visibility to match a passing verdict.
 
 🚨 RULE 0: EXISTENCE & COMPLETENESS LOCK (PRIMARY MANDATE)
 ============================================================
@@ -189,10 +176,11 @@ ${feedsJson}
 - **WIDGET-LEVEL CENTER**: Is the widget centered in its own container, or is it shoved against a boundary?
 - **ARROW OVERLAP EXCEPTION (INTENDED DESIGN)**: For Carousel/Slider widgets, Navigation Arrows (Circular buttons) are **PERMITTED** to overlap the card background or border. This is NOT a failure unless Rule 18.A applies.
 - **RULE 18.A (CONTENT BLOCKAGE)**: TRIGGER **FAIL** ONLY if the arrow button physically covers any **Text**, **Reviewer Name**, or **Star Ratings**.
-- **RULE 18.B (CIRCULAR BOUNDARY AUDIT - AVATAR GROUPS)**: Specifically check the FIRST (leftmost) and LAST (rightmost) avatars in a row. 
-    - **THE ARC TEST**: You are PROHIBITED from marking a PASS for layout unless you can see a perfect 360-degree curved arc for both end-cap avatars. 
-    - **END-CAP DESCRIPTION (MANDATORY)**: You MUST describe the right edge of the final avatar: "The arc of the [VU/Avatar] is either [Complete Curve] or [Unintended Truncation]."
-    - **RECTIPHOBIA FAIL**: If an avatar ends in a flat vertical line instead of a curve, or if it bleeds into the image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
+- **RULE 18.B: THE AVATAR INTEGRITY LOCK (360° ARC & CONTENT TEST)**: Audit the boundary and interior of all avatars/images.
+    - **THE ARC TEST**: You are PROHIBITED from marking a PASS for layout or avatar rendering unless you can see a perfect 360-degree curved arc for every circular avatar. 
+    - **INITIALS AUDIT (LITERAL EYE)**: If letters (e.g., "PA", "AN") are inside the circle/square, you MUST verify they are fully visible. If characters are half-sliced or cut-off, trigger **FAIL_AVATAR_TRUNCATED**.
+    - **FACIAL INTEGRITY (HEAD/SCALP)**: If a human face is present, the entire head/scalp must be visible. If the top of the head is cut off (flat-top effect), it is a clinical **FAIL_AVATAR_TRUNCATED**.
+    - **RECTIPHOBIA FAIL**: If an avatar ends in a flat vertical line instead of a curve, or if it bleeds into the boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
 - **RULE 20: THE HORIZON AUDIT (ZERO TOLERANCE)**: 
     - Mandate a 15px "Safety Buffer" on the RIGHT-HAND edge of every screenshot.
     - **HORIZON FAIL**: If any part of the widget content (Arc edge, Star point, or Text character) touches the absolute right image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
@@ -420,6 +408,12 @@ ${isMultiImage ? `
 
 **RULE 12: RATING VISIBILITY (HYBRID & MULTI-COLOR)**
 - **PASS CRITERIA**: If ratings are visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
+- **DATA-DRIVEN PASS (RULE 12.A)**: If Config Status is **Visible** but the UI is **Absent**:
+    - Perform a **Section 0 Audit**.
+    - If ALL reviews in Section 0 have \`rating: null\` AND \`response: null\` (or 0), you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
+    - **RASTER TRUTH**: Do NOT report UI Status as 'Visible' if you cannot see stars. UI Status reflects the **PIXELS**, Verdict reflects the **LOGIC**.
+    - **REMARK**: "[Card: Name] Review ratings are correctly absent as the data is null/0 (Proof: ID:123, Rating:null)".
+- **VIOLATION (RULE 12.B)**: If UI is **Visible** but Config specifies **Absent**, you MUST mark the verdict as **FAIL** (This is a product regression).
 - **HYBRID SUPPORT**: A card may show **Stars AND Numbers** (or Tacos) together. If you see ANY combination, it is a **PASS**.
 - **SIGNATURES**: 
     - **TYPE A (STARS)**: Single or Repetitive star icons (any color).
@@ -430,7 +424,13 @@ ${isMultiImage ? `
 
 **RULE 13: SOCIAL PLATFORM ICON (BRAND IDENTITY INVENTORY)**
 - **PASS CRITERIA**: If a platform icon or brand logo is visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
-- **MANDATORY BRAND CHECK**: You MUST name the platform (e.g., "I see the Google 'G' icon"). If the corner is empty, mark it **Absent** and **FAIL** the category.
+- **DATA-DRIVEN PASS (RULE 13.A)**: If Config Status is **Visible** but the UI is **Absent**:
+    - Perform a **Section 0 Audit** for the \`slug\`.
+    - If ALL reviews in Section 0 have \`slug: null\`, \`N/A\`, \`NA\`, \`manual\`, or are empty, you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
+    - **RASTER TRUTH**: Do NOT report UI Status as 'Visible' if you cannot see logos. UI Status reflects the **PIXELS**, Verdict reflects the **LOGIC**.
+    - **REMARK**: "[Card: Name] Social platform icon is correctly absent as the data slug is missing/manual (Proof: ID:123, Slug:N/A)".
+- **VIOLATION (RULE 13.B)**: If UI is **Visible** but Config is **Absent**, you MUST mark the verdict as **FAIL** (This is a product regression).
+- **MANDATORY BRAND CHECK**: You MUST name the platform (e.g., "I see the Google 'G' icon"). If the corner is empty, mark it **Absent** and follow Rule 13.A.
 - **SIGNATURES**: Logos (Google, Fresha) or small circular/square brand icons in the top-right corner.
 `;
 
@@ -715,14 +715,12 @@ Q2. **MANDATORY FORENSIC QUALITY INVENTORY (MFQI - PIXEL SKEPTIC)**:
     - **FAIL TRIGGER**: If Avatar Edge Width > Text Edge Width (e.g., text is 1px but avatar is 3px fuzzy), trigger **FAIL_SHARP_BLURRY**.
     - **LOG FORMAT**: "[Name/ID] | TextEdge: 1px | AvatarDetail: [X]px | Delta: [DIFF]px | Texture: [Grainy/Razor/Muddy/Watercolor] | Verdict"
     - **PROOF MANDATE**: You MUST describe a micro-feature (e.g., "I see individual hair strands" or "Faces are mud-blobs with no iris separation").
-Q3. **PHOTO-SMEAR SCAN**: Any face looks like a watercolor painting or smudge? → [FAIL / PASS]
+Q3. **CONTENT INTEGRITY AUDIT (IRON LOCK)**:
+    - **INITIALS**: Do any initials (e.g. "PA") look sliced, half-visible, or cut off? → [YES: FAIL / NO]
+    - **FACIAL**: Is the top of the human head/scalp cut off (flat-top portion)? → [YES: FAIL / NO]
+    - **ARC**: Apply RULE 18.B (360° Arc Integrity). Any flat edges on the circle? → [YES: FAIL / NO]
+    - **VERDICT**: If ANY 'YES', report Category D as **FAIL** using token **FAIL_AVATAR_TRUNCATED**. 
 
-Q3. **SHARPNESS BENCHMARK (FORENSIC OVERRIDE)**: 
-    - Apply the **PIXELATION & UPSCALING MANDATE** (Rule 1.A).
-    - **FORENSIC PROOF**: You are FORBIDDEN from reporting 'SHARP' unless you name the texture (e.g., 'I can see 1px razor edges on the iris/pupil').
-    - Does image show "Macro-blocking" or "Step-laddering" artifacts? → [Passing - SHARP / Failing - **FAIL_SHARP_MEDIA**]
-    - **Audit Failure State**: If Image Detail > 1.1px, mark category as **FAIL**. 
-    - **If no images**: → "Passing - SHARP (N/A)"
 Q4. All media fully visible within container? → [FULLY VISIBLE / PARTIALLY HIDDEN]
 
 **F. THEME & COLOR VISIBILITY**

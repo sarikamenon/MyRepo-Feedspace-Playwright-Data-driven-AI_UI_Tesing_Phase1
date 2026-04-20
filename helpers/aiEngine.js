@@ -575,9 +575,26 @@ class AIEngine {
             }
         });
 
+        // --- EMPTY STATE REMEDIATION ---
+        if (isEmptyState && aiData.feature_results) {
+            const cardLevelFeatures = [
+                "Show Review Date", "Show Review Ratings", "Read More", 
+                "Show Social Platform Icon", "Review Image / Avatar", "Show Star Ratings"
+            ];
+            
+            aiData.feature_results.forEach(f => {
+                const isCardFeature = cardLevelFeatures.includes(f.feature);
+                // If it failed because it was absent, but it's a card feature on an empty widget, force PASS
+                if (f.status === "FAIL" && f.ui_status === "Absent" && isCardFeature) {
+                    f.status = "PASS (Empty State)";
+                    f.issue = "No visual defects detected (Empty State Pass)";
+                    f.remarks = "Feature is absent because the widget contains zero reviews. This is expected behavior.";
+                }
+            });
+        }
+
         // 🛡️ TOTAL TRUTH OVERRIDE: Synchronize mathematical defects ONLY for confirmed FAILURES
         if (geometricWarnings && geometricWarnings.length > 0) {
-            // Strictly exclude SYMMETRY_SIGNAL which is an audit suggestion, not a hard failure.
             const clinicalDefects = geometricWarnings.filter(msg => 
                 (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') || 
                 msg.includes('PARTIAL') || msg.includes('CUT')) && 
