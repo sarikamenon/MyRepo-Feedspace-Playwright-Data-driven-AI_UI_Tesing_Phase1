@@ -1,11 +1,10 @@
 {
     "features": [
         "Inline CTA",
-        "Read More",
         "Show Review Date",
         "Show Review Ratings",
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
-    "commented_features": []
+    "commented_features": ["Read More"]
 }

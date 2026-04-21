@@ -40,6 +40,7 @@ const FEEDSPACE_SELECTORS = [
     '.feedspace-carousel-widget',
     '.feedspace-marque-main-wrap',
     '.feedspace-show-overlay',
+    '.feedspace-embed',
     '[class*="feedspace-embed"]',
     '.strip-slider',
     '.feedspace-single-review-widget',
@@ -59,6 +60,8 @@ const FEEDSPACE_SELECTORS = [
     '[data-fs-processed]',
     '[data-widget-type]',
     '[data-type]',
+    '[data-id]',
+    '[unique_widget_id]',
     '[widget_type_id]',
     '[data-feedspace-type]'
 ];
@@ -499,7 +502,8 @@ class PlaywrightHelper {
             let isNetworkMatched = this._networkHasType(this.expectedType);
 
             if (!isNetworkMatched) {
-                console.log(`[PlaywrightHelper] ${this.expectedType} not seen yet in network — polling for up to 15s...`);
+                const seenTypes = [...new Set(Object.values(this.networkWidgetMap))];
+                console.log(`[PlaywrightHelper] ${this.expectedType} not seen yet in network (Intercepted types so far: [${seenTypes.join(', ') || 'None'}]) — polling...`);
                 for (let i = 0; i < 30; i++) {
                     await this._sleep(500);
                     isNetworkMatched = this._networkHasType(this.expectedType);
@@ -525,7 +529,9 @@ class PlaywrightHelper {
             }
 
             if (!locator && !isNetworkMatched) {
-                const reason = `Widget Identification Failure: No valid container or network signature found for ${this.expectedType}. Since the widget is not physically present on the UI, further interactions and AI visual checks have been skipped to prevent "Ghost Failures".`;
+                const seenTypes = [...new Set(Object.values(this.networkWidgetMap))];
+                const typeInfo = seenTypes.length > 0 ? ` (Detected ${seenTypes.join(', ')} instead)` : '';
+                const reason = `Widget Identification Failure: No valid container or network signature found for ${this.expectedType}.${typeInfo} Since the widget is not physically present on the UI, further interactions and AI visual checks have been skipped to prevent "Ghost Failures".`;
                 console.warn(`[PlaywrightHelper] ⚠️  ${reason}`);
                 this.widgetType = 'Widget Not Found';
                 this.typeMatchResult = {
@@ -708,10 +714,12 @@ class PlaywrightHelper {
                 while (pollAttempts < maxPolls) {
                     pollAttempts++;
                     domTruth = await locator.evaluate(el => {
-                        const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]'];
-                        const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon'];
+                        const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]', '[class*="platform-icon"]'];
+                        const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon', '[class*="rating-star"]', '.fs-stars-wrapper'];
                         const itemSels = [
                             '.feedspace-card', '.fe-feed-item', '.review-card',
+                            '[class*="feed-box"]', '[class*="review-card"]', 
+                            '[class*="-element-d"]',
                             '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
                             '[data-feed-id]', '.fe-review-body', '.feedspace-body',
                             '.carousel-item', '.fe-slick-slide', '.slick-slide'
@@ -740,9 +748,12 @@ class PlaywrightHelper {
                             return total;
                         };
 
-                        const iconsFound = findDeep(el, iconSels) || (el.shadowRoot && findDeep(el.shadowRoot, iconSels));
-                        const starsFound = findDeep(el, starSels) || (el.shadowRoot && findDeep(el.shadowRoot, starSels));
-                        const itemCount = countDeep(el, itemSels) + (el.shadowRoot ? countDeep(el.shadowRoot, itemSels) : 0);
+                        // FIX: Only call countDeep once on the root or its shadow.
+                        // Recursive logic handles the rest correctly.
+                        const context = el.shadowRoot || el;
+                        const iconsFound = findDeep(context, iconSels);
+                        const starsFound = findDeep(context, starSels);
+                        const itemCount = countDeep(context, itemSels);
 
                         return { iconsFound, starsFound, itemCount };
                     }).catch(() => ({ iconsFound: false, starsFound: false, itemCount: 0 }));
@@ -763,7 +774,7 @@ class PlaywrightHelper {
 
                 if (domTruth.iconsFound) {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
-                    this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present in the top-right corner of the review cards. You MUST report them as 'Visible'.");
+                    this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
                 if (!domTruth.starsFound && domTruth.itemCount > 0) {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
@@ -1081,6 +1092,9 @@ class PlaywrightHelper {
 
         if (isSlider) {
             console.log(`[PlaywrightHelper] Skipping "Load More" loop for ${type} widget.`);
+            // [DEPRECATED] Expand any visible "Read More" for sliders/marquees/toasts
+            // await this._expandReadMore(context);
+            
             // Just capture the initial state for the storyboard
             if (screenshotBuffers.length === 0) {
                 const initialShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
@@ -1097,6 +1111,7 @@ class PlaywrightHelper {
 
         // --- View 1: Initial State (Click 0) ---
         if (screenshotBuffers.length === 0) {
+            await this._expandReadMore(context);
             const initialShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
             if (initialShot) {
                 console.log('[PlaywrightHelper] Storyboard: Captured View 1 (Initial State)');
@@ -1128,6 +1143,8 @@ class PlaywrightHelper {
                 // --- View 2 & 3: Progression States (Click 1 and 4) ---
                 if (clickCount === 1 || clickCount === 4) {
                     console.log(`[PlaywrightHelper] Storyboard: Capturing View ${clickCount === 1 ? '2' : '3'}...`);
+                    // Ensure new content is expanded before screenshot
+                    await this._expandReadMore(context);
                     // Smart scroll: Ensure we see the NEWLY loaded area
                     await context.evaluate(() => window.scrollBy(0, 400)).catch(() => { });
                     const shot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
@@ -1182,6 +1199,37 @@ class PlaywrightHelper {
         } catch (e) {
             console.warn('[PlaywrightHelper] Custom scroll failed, falling back:', e.message);
             await locator.scrollIntoViewIfNeeded().catch(() => { });
+        }
+    }
+
+    /**
+     * Finds and clicks all "Read More" buttons within a container to expand content.
+     */
+    async _expandReadMore(containerLocator) {
+        if (!containerLocator) return;
+        try {
+            // Find all elements containing "Read More" (buttons, links, or spans)
+            // We use a broader selector and filter by visibility
+            const readMoreLocators = [
+                containerLocator.getByText('Read More', { exact: false }),
+                containerLocator.locator('a:has-text("Read More")'),
+                containerLocator.locator('button:has-text("Read More")'),
+                containerLocator.locator('span:has-text("Read More")')
+            ];
+
+            for (const loc of readMoreLocators) {
+                const count = await loc.count().catch(() => 0);
+                for (let i = 0; i < count; i++) {
+                    const btn = loc.nth(i);
+                    if (await btn.isVisible().catch(() => false)) {
+                        console.log(`[PlaywrightHelper] Clicking 'Read More' button ${i+1}`);
+                        await btn.click({ force: true, timeout: 2000 }).catch(() => {});
+                        await this._sleep(200); // Animation buffer
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn(`[PlaywrightHelper] Read More expansion failed: ${e.message}`);
         }
     }
 

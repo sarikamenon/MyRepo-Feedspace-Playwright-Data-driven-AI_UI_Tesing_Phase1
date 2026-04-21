@@ -35,6 +35,9 @@ class HorizontalScrollHelper {
             await page.evaluate(() => window.scrollBy(0, 1));
             await page.waitForTimeout(100);
             await page.evaluate(() => window.scrollBy(0, -1));
+            
+            // 🟢 Expand "Read More" if present
+            await this._tryExpandReadMore(widgetLocator);
 
             // 1️⃣ Identify rows - try common classes or containers with horizontal flow
             const rowSelectors = [
@@ -230,6 +233,23 @@ class HorizontalScrollHelper {
             positions.push(rowMap);
         }
         return positions;
+    }
+
+    /**
+     * Attempts to find and click "Read More" buttons to expand truncated reviews.
+     */
+    static async _tryExpandReadMore(container) {
+        try {
+            const readMore = container.locator('button, a, span', { hasText: /Read More/i }).filter({ visible: true });
+            const count = await readMore.count().catch(() => 0);
+            for (let i = 0; i < count; i++) {
+                console.log(`[HorizontalScrollHelper] Expanding Read More #${i + 1}`);
+                await readMore.nth(i).click({ force: true, timeout: 2000 }).catch(() => { });
+                await new Promise(r => setTimeout(r, 300)); // Animation buffer
+            }
+        } catch (e) {
+            // Non-critical failure
+        }
     }
 }
 

@@ -117,7 +117,7 @@ ${sensoryTruth}
 ============================================================
 1. **MULTI-FAULT MANDATE**: You are PROHIBITED from stopping at the first defect. If an image is blurry AND the layout is clipped/overlapped, YOU MUST PROVIDE BOTH REASONS. A quality failure does not mask a layout failure.
 2. **ZERO TOLERANCE**: If Rule 0 or Rule 1 triggers, you are FORBIDDEN from reporting any Category as PASS. Mark ALL affected categories as FAIL.
-3. **DIFFERENTIAL TEXTURE AUDIT (MANDATORY)**: Compare the pixel-texture of every image/avatar against the razor-sharp vector edges of the text (Name/Job Role). If the image looks "muddy", "soft", or "watercolor-like" compared to the crisp text characters, YOU MUST report status: **FAIL** and trigger the token **FAIL_SHARP_BLURRY**.
+3. **DIFFERENTIAL TEXTURE AUDIT (MANDATORY)**: Compare the pixel-texture of images/avatars against the vector edges of the text. While text is naturally sharper, report status: **FAIL** ONLY if the image shows digital artifacts like **Macro-blocking**, **Pixelation**, or **Unrecognizable features**. "Soft-focus" or natural photo smoothness is a **PASS**.
 4. **RASTER TRUTH MANDATE (CRITICAL)**: You are FORBIDDEN from reporting UI Status as 'Visible' for any element you cannot see in the pixels. If Config is 'Visible' but Data is 'null/NA', you MUST report **UI Status: Absent** and **Verdict: PASS**. Never hallucinate visibility to match a passing verdict.
 
 🚨 RULE 0: EXISTENCE & COMPLETENESS LOCK (PRIMARY MANDATE)
@@ -154,11 +154,11 @@ ${sensoryTruth}
    - **Macro-blocking**: Audit skin tones. If you see chunks of uniform color (digital noise/checkerboards) rather than natural grain, it is a clinical **FAIL_SHARP_MACRO_BLOCKING**.
    - **Eye-Detail Test**: Zoom into the eyes. If there is no iris/pupil separation (just a smudge), the asset is low-res. **FAIL_SHARP_AVATAR**.
    - **Forensic Logic**: "The text has razor-edges, but the avatar interior shows blocky upscaling artifacts (Macro-blocking)."
-3. **THE "SMOOTHNESS" FAIL**: If an image looks "creamy" or "waxy" but lacks 1px-thin textures, it is defined as **INTERPOLATION BLUR**. Smoothness is a defect.
+3. **THE "SMOOTHNESS" AUDIT**: If an image looks "creamy" or "waxy", but features (eyes, nose, mouth) are clearly distinct, it is a **PASS**. Smoothness is only a defect if it obscures the content.
 4. **DIFFERENTIAL SHARPNESS AUDIT**:
     - Compare target photo to reference vector (Name/Text).
     - If the disparity is > 1px in edge-width, you MUST report **FAIL_HYBRID_SHARPNESS**.
-5. **SYSTEM VERDICT**: Any image that is even 0.5px softer than the vector text is a clinical defect. You MUST use tokens **FAIL_SHARP_AVATAR** or **FAIL_SHARP_MEDIA**.
+5. **SYSTEM VERDICT**: Report **FAIL_SHARP_AVATAR** only if the asset is visibly broken or low-quality to a human eye. Do not use the razor-sharp text as an absolute benchmark for natural photos.
     - **FADING EDGE EXCEPTION (MARQUEE)**: Dynamic scrolling edges are **PERMITTED** to be soft. Use **PASS_FORCE_SHARP**.
 
 ============================================================
@@ -232,6 +232,10 @@ ${isMultiImage ? `
             - **VERDICT: Not Applicable**.
             - **REMARK**: "[Card: INSERT_NAME] Social platform icon is not present as the data (slug) is missing or manual source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
             - **MANDATORY**: For the 'Show Social Platform Icon' result, use status "Not Applicable" if this condition is met for all cards in the screenshot.
+    - **RULE 20.C (COMPACT WIDGET EXCEPTION - MARQUEE/TOAST)**:
+        - For **MARQUEE_STRIPE** and **FLOATING_TOAST** widgets: 
+        - If the social icon is visible in the **EXPANDED POPUP/MODAL**, you MUST report **PASS** for 'Show Social Platform Icon' even if it is absent in the scrolling stripe/preview card.
+        - **REASONING**: This is "Intended Compact Design" where icons are omitted from the small preview cards but present in the high-fidelity detail view.
 3. **IDENTIFY SKELETONS vs VIDEOS**: 
     - **SKELETON BARS**: These are elongated, horizontal, pulsating bars (often light gray) that mimic text lines.
     - **VIDEO PLACEHOLDERS**: A solid gray, brown, or black rectangular box with a centered "Play" triangle icon is a **Video Placeholder**, NOT a skeleton bar. Do NOT trigger skeleton pass logic for these.
@@ -548,7 +552,8 @@ Q9. **DESCENDER AUDIT (RULE 19)**: Look at the last line of text. Are the "tails
 **RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
 - **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
 - **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
-- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully), the final status MUST be **FAIL**.
+- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
+- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
 **RULE 22: THE OVERFLOW & RESILIENCY AUDIT**
 - **VERTICAL SYMMETRY**: Compare the whitespace at the TOP of the card to the whitespace at the BOTTOM.
 - **NON-RESILIENT FAIL**: If the top padding is large (e.g. 30px) but the bottom padding is < 4px (causing content to hit the edge), the layout is **SHATTERED**.
@@ -574,11 +579,19 @@ Q5. **DATE FORMAT**: Inside popup—strict "Month DD, YYYY" visible? → [VISIBL
 **SINGLE_SLIDER — WIDGET-SPECIFIC CHECKS:**
 Q1. Review content sliced at top/bottom? → [FULLY VISIBLE / SLICED]
 Q2. All elements within safe boundaries? → [YES / NO]
-Q3. Content parity across slides? → [CONSISTENT / MISMATCHED]
+Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)? → [VISIBLE / MISSING]
+Q4. **READ MORE AUDIT**: Look for literal text "Read More" immediately following an ellipsis (...).
+    - If you see (...) followed by "Read More" → [VISIBLE]
+    - If you see (...) but NO "Read More" → [ABSENT_TRUNCATED_FAIL]
+    - If NO ellipsis (...) exists → [PASS_NOT_REQUIRED]
+    → [VISIBLE / ABSENT_TRUNCATED_FAIL / PASS_NOT_REQUIRED]
+Q5. **STAR RATING AUDIT**: Look at the TOP of the widget (above the review text). Are there 5 stars visible? → [VISIBLE / MISSING]
 
 **FAILURE TRIGGERS:**
 - Q1 SLICED or Q2 NO → Apply RULE 2 → FAIL Category A
-- Q3 MISMATCHED → FAIL Category A
+- Q3 MISSING (if config says "Visible") → FAIL feature
+- Q4 ABSENT_TRUNCATED_FAIL → FAIL feature
+- Q5 MISSING (if config says "Visible") → FAIL feature
 - Apply RULE 1 (Sharpness) to all visible images`,
 
       MARQUEE_UPDOWN: `

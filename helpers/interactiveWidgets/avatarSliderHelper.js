@@ -82,6 +82,8 @@ class AvatarSliderHelper {
 
                     if (await contentArea.isVisible()) {
                         await contentArea.scrollIntoViewIfNeeded().catch(() => { });
+                        // 🟢 Expand "Read More" if present
+                        await this._tryExpandReadMore(contentArea);
                     }
 
                     // Use the widgetLocator if available to capture the full context (arrows, avatars, text)
@@ -128,6 +130,23 @@ class AvatarSliderHelper {
         }
 
         return screenshotBuffers;
+    }
+
+    /**
+     * Attempts to find and click "Read More" buttons to expand truncated reviews.
+     */
+    static async _tryExpandReadMore(container) {
+        try {
+            const readMore = container.locator('button, a, span', { hasText: /Read More/i }).filter({ visible: true });
+            const count = await readMore.count().catch(() => 0);
+            for (let i = 0; i < count; i++) {
+                console.log(`[AvatarSliderHelper] Expanding Read More #${i + 1}`);
+                await readMore.nth(i).click({ force: true, timeout: 2000 }).catch(() => { });
+                await new Promise(r => setTimeout(r, 300)); // Animation buffer
+            }
+        } catch (e) {
+            // Non-critical failure
+        }
     }
 }
 

@@ -250,10 +250,10 @@ class AIEngine {
             const bluntFailures = [
                 "blurry-fail", "blurred-fail", "fuzzy-fail", "sharp-fail", "blur-fail", "fail-blur",
                 "loss-of-sharpness", "missing-elements", "clipped-fail", "sliced-fail",
-                "json-leakage", "raw-code", "json-leak", "muddy"
+                "json-leakage", "raw-code", "json-leak"
             ];
 
-            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing"];
+            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with"];
 
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
@@ -366,10 +366,10 @@ class AIEngine {
 
         // ── SHARPNESS: Strict tokens + Fuzzy Keyword fallback ──
         const blurKeywords = [
-            "slightly soft", "compressed image", "low-res", "fuzzy", "blur",
-            "pixelated", "smeared", "watercolor", "muddy texture", "poor clarity",
-            "smooth texture", "clean appearance", "interpolation", "high-level smoothing",
-            "water-color", "cloud-like", "soft detail", "hybrid sharpness", "differential fail",
+            "compressed image", "low-res", "fuzzy", "blur",
+            "pixelated", "smeared", "poor clarity",
+            "interpolation", "high-level smoothing",
+            "cloud-like", "soft detail", "hybrid sharpness", "differential fail",
             "softer than text", "partially cut", "sliced", "half-moon", "flattened edge", "rectilinear cut",
             "flattened arc", "straight line cut", "star overlap", "duplicated text", "border touching boundary"
         ];

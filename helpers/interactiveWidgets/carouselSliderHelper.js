@@ -42,7 +42,8 @@ class CarouselSliderHelper {
             }
 
             // Extra wait for layout and reviews to settle
-            console.log('[CarouselSliderHelper] Waiting 5s for initial stabilization...');
+            console.log('[CarouselSliderHelper] Waiting 5s for initial stabilization and expansion...');
+            await this._tryExpandReadMore(widgetLocator);
             await page.waitForTimeout(5000);
 
             // 1. First Screenshot: Entire Page
@@ -129,6 +130,23 @@ class CarouselSliderHelper {
         }
 
         return screenshots;
+    }
+
+    /**
+     * Attempts to find and click "Read More" buttons to expand truncated reviews.
+     */
+    static async _tryExpandReadMore(container) {
+        try {
+            const readMore = container.locator('button, a, span', { hasText: /Read More/i }).filter({ visible: true });
+            const count = await readMore.count().catch(() => 0);
+            for (let i = 0; i < count; i++) {
+                console.log(`[CarouselSliderHelper] Expanding Read More #${i + 1}`);
+                await readMore.nth(i).click({ force: true, timeout: 2000 }).catch(() => { });
+                await new Promise(r => setTimeout(r, 300)); // Animation buffer
+            }
+        } catch (e) {
+            // Non-critical failure
+        }
     }
 }
 
