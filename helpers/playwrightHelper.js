@@ -277,6 +277,10 @@ class PlaywrightHelper {
                     console.log('[PlaywrightHelper] Feedspace embed script not detected — proceeding.');
                 });
 
+                // ── MODAL CRUSHER ──
+                // Dismiss common blocking popups (cookies, newsletters, etc.)
+                await this._dismissModals();
+
                 return;
 
             } catch (error) {
@@ -332,6 +336,49 @@ class PlaywrightHelper {
         // 2. Mandatory stability sleep to allow the script to execute and render the widget
         console.log('[PlaywrightHelper] Stabilizing for 10s...');
         await this._sleep(10000);
+    }
+
+    /**
+     * Dismiss common blocking modals (CHIUDI, Accept, Close, etc.)
+     */
+    async _dismissModals() {
+        console.log('[PlaywrightHelper] 🛠️  Modal Crusher: Checking for blocking popups...');
+        try {
+            await this.page.evaluate(() => {
+                const closePatterns = [
+                    'chiudi', 'close', 'accept', 'acconsento', 'agree', 'ok', 'understand', 'got it', 'dismiss', 'ho capito'
+                ];
+                
+                // Search for buttons or elements that look like close/accept buttons
+                const elements = Array.from(document.querySelectorAll('button, a, span, div, i'));
+                let clicked = 0;
+
+                for (const el of elements) {
+                    const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    const isMatch = closePatterns.includes(text) || 
+                                    (text === 'x' && el.offsetWidth < 50) ||
+                                    (el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('close'));
+
+                    if (isMatch) {
+                        const style = window.getComputedStyle(el);
+                        const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0 && 
+                                          style.display !== 'none' && style.visibility !== 'hidden' && 
+                                          style.opacity !== '0';
+
+                        if (isVisible) {
+                            el.click();
+                            clicked++;
+                        }
+                    }
+                }
+                return clicked;
+            }).then(count => {
+                if (count > 0) console.log(`[PlaywrightHelper] 🛡️  Modal Crusher: Dismissed ${count} potential popup(s).`);
+            });
+            await this._sleep(2000); // Wait for modal to disappear
+        } catch (e) {
+            console.warn(`[PlaywrightHelper] ⚠️ Modal Crusher failed: ${e.message}`);
+        }
     }
 
     /**

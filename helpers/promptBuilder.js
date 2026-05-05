@@ -374,11 +374,11 @@ ${isMultiImage ? `
 **RULE 14: DATE VALIDATION (SCREENSHOT-ONLY Mandate)**
 ============================================================
 - **DATA-BLINDNESS MANDATE (CRITICAL)**: You are FORBIDDEN from using \`feeds_data\` or \`review_at\` values from Section 0 to audit date formats. You MUST audit ONLY what is physically painted on the screenshot pixels.
-- **FORMAT REQUIREMENT**: Must match "Month DD, YYYY" (e.g., "Jan 10, 2024" or "January 10, 2024").
-- **COMPONENTS**: Must contain (1) Month Name, (2) Day Number, (3) Comma, and (4) 4-digit Year.
+- **FORMAT REQUIREMENT**: Must match "Month D, YYYY" or "Month DD, YYYY" (e.g., "Mar 8, 2026", "Jan 10, 2024", or "January 10, 2024").
+- **COMPONENTS**: Must contain (1) Month Name (3-letter abbreviation or full name), (2) Day Number (1 or 2 digits), (3) Comma, and (4) 4-digit Year.
 - **LOCATION (MANDATORY)**: The date MUST be anchored in the **absolute bottom-left corner** of the review card boundary.
 - **FORBIDDEN (REPORT AS ABSENT)**: "Month Year" (e.g., "October 2025"), "MM/DD/YYYY", or any format missing the day, comma, or positioned anywhere other than the bottom-left. 
-- **LITERAL TRUTH**: If you see a date that does NOT match this exact format or location, you MUST report UI Status: **Absent**.
+- **LITERAL TRUTH**: If you see a date that does NOT match these components or location, you MUST report UI Status: **Absent**.
 - **REGRESSION LOCK (CRITICAL)**: If "Show Review Date" is reported as **Visible** in the UI but the **Config Status** is **Absent**, you MUST report Verdict: **FAIL** and trigger the token **VIOLATION: Product Regression**.
 - **Triggers**: Category C (Text) or Category G (Date check).
 - **PASS/FAIL HYGIENE**: 
@@ -530,7 +530,7 @@ Q1. **TRANSCRIPTION TEST**: Look at the review body.
     - If text area shows solid filled rectangles with no distinct characters (grey bars, skeleton blocks) → respond "**ACTUAL_BAR_FAILURE**".
     → [ACTUAL WORDS / "ACTUAL_BAR_FAILURE"]
 Q2. **POPUP BOTTOM EDGE**: Apply RULE 7—complete rounded border visible? → [PASS / FLAT-WALL FAIL]
-Q3. **DATE ANCHOR**: Look at absolute bottom-left of popup. Is there a date string (e.g. "February 10, 2026")?
+Q3. **DATE ANCHOR**: Look at absolute bottom-left of popup. Is there a date string (e.g. "Mar 8, 2026" or "February 10, 2026")?
     → Quote exact date text: [DATE / "ABSENT"]
 Q4. **READ MORE ANCHOR**: Apply RULE 5—Look for literal literal text "Read more" (usually blue) above the date or at the text end?
     → Quote exact words: ["Read more" / "ABSENT"]
@@ -567,7 +567,7 @@ Q1. **ASYMMETRIC CORNER**: Rightmost card—rounded or 90° chop? → [ROUNDED /
 Q2. **POPUP BOTTOM**: Apply RULE 7 (complete bottom visible?) → [PASS / FLAT-WALL / NO POPUP]
 Q3. All cards fully visible? → [ALL VISIBLE / SOME PARTIAL]
 Q4. Card width parity (rightmost vs others)? → [PASS / NARROW-CLIPPED]
-Q5. **DATE FORMAT**: Inside popup—strict "Month DD, YYYY" visible? → [VISIBLE / ABSENT]
+Q5. **DATE FORMAT**: Inside popup—strict "Month D, YYYY" or "Month DD, YYYY" (e.g., Mar 8, 2026) visible? → [VISIBLE / ABSENT]
 
 **FAILURE TRIGGERS:**
 - Q1 CHOPPED → Apply RULE 2 → FAIL Category A
@@ -621,7 +621,7 @@ Q3. Content parity across scrolling cards? → [CONSISTENT / MISMATCHED]
 Q1. **ASYMMETRIC CORNER**: Rightmost card—rounded or 90° chop? → [ROUNDED / CHOPPED]
 Q2. All cards fully visible? → [ALL VISIBLE / SOME PARTIAL]
 Q3. Card width parity (rightmost vs peers)? → [PASS / NARROW-CLIPPED]
-Q4. **DATE FORMAT**: Strict "Month DD, YYYY" in cards? → [VISIBLE / ABSENT]
+Q4. **DATE FORMAT**: Strict "Month D, YYYY" or "Month DD, YYYY" (e.g., Mar 8, 2026) in cards? → [VISIBLE / ABSENT]
 
 **FAILURE TRIGGERS:**
 - Q1 CHOPPED → Apply RULE 2 → FAIL Category A

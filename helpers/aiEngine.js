@@ -328,7 +328,7 @@ class AIEngine {
             "FAIL_TEXT_TRUNCATED": "Text is cut off mid-sentence or lacks vertical clearance (Squeeze Failure).",
             "FAIL_LAYOUT_SHATTERED": "Layout is non-resilient; content is squeezing out of the container boundary (Padding Mismatch).",
             "FAIL_DATE_FORMAT": "Review date format is incorrect (Missing Day/Month/Year components).",
-            "FAIL_DATE_RULE14": "Review date format is incorrect; must strictly follow Month DD, YYYY (e.g., Oct 17, 2025).",
+            "FAIL_DATE_RULE14": "Review date format is incorrect; must strictly follow Month D, YYYY (e.g., Mar 8, 2026).",
             "missing bottom edge": "Widget container is clipped; the bottom border/edge is missing or bleeding off.",
             "kn...": "Text truncation detected (Incomplete word 'know' rendered as 'kn...').",
             "needed to kn...": "Text truncation detected (Incomplete word 'know' rendered as 'kn...').",
@@ -523,8 +523,8 @@ class AIEngine {
                             ratingValue === undefined ||
                             ratingValue === "";
                     } else if (isIconTrait) {
-                        // FORCE DEFAULT: If show_platform_icon is missing from config, we assume it's OFF ('0')
-                        const showIconConfig = config?.widget_customization?.show_platform_icon ?? "0";
+                        // FORCE DEFAULT: Use the robustly parsed config_status from the AI prompt logic
+                        const showIconConfig = (f.config_status === "Visible" || f.config_status?.includes("Visible")) ? "1" : "0";
                         const slug = matchingFeed.social_platform?.slug || "";
                         const feedType = matchingFeed.feed_type || "";
                         const isManualReview = slug.includes("manual");

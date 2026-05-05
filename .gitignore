@@ -4,17 +4,21 @@ playwright-report/
 reports/
 test-results/
 screenshots/
-testdata/*.json
+testData/*.json
+processed_urls_ondemand.json
 
 # Logs & debug files
 *.log
-*.txt
 debug_output.txt
 final_verification.log
+testOutput.txt
+tmp_report_out.txt
+
+# Temp files
+tmp/
 
 # Reports
 *.html
-
 
 # Environment files
 .env
