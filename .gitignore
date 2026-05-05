@@ -6,6 +6,7 @@ test-results/
 screenshots/
 testData/*.json
 processed_urls_ondemand.json
+testData/processed_urls_ondemand.json
 
 # Logs & debug files
 *.log
