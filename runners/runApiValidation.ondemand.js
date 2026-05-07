@@ -72,7 +72,8 @@ const WIDGET_CONFIG_MAP = {
     'FLOATING_TOAST': 'floatingCardsFeature',
     'AVATAR_CAROUSEL': 'avatarCarouselFeature',
     'CROSS_SLIDER': 'crossSliderFeature',
-    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature'
+    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
+    'AVATAR_BLOCK': 'avatarBlockFeature'
 };
 
 /**

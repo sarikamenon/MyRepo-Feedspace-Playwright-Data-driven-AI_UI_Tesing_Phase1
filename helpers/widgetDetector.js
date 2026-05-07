@@ -14,7 +14,8 @@ const WidgetTypeConstants = {
     11: 'FLOATING_TOAST',
     16: 'AVATAR_CAROUSEL',
     17: 'CROSS_SLIDER',
-    18: 'COMPANY_LOGO_SLIDER'
+    18: 'COMPANY_LOGO_SLIDER',
+    19: 'AVATAR_BLOCK'
 };
 
 const WidgetTypeNames = {
@@ -28,7 +29,8 @@ const WidgetTypeNames = {
     FLOATING_TOAST: 11,
     AVATAR_CAROUSEL: 16,
     CROSS_SLIDER: 17,
-    COMPANY_LOGO_SLIDER: 18
+    COMPANY_LOGO_SLIDER: 18,
+    AVATAR_BLOCK: 19
 };
 
 // Frontend alias terms that map to backend constants
@@ -48,7 +50,8 @@ const WidgetAliases = {
     'avatarcarousel': 'AVATAR_CAROUSEL',
     'crossslider': 'CROSS_SLIDER',
     'avatarslider': 'SINGLE_SLIDER',
-    'companylogoslider': 'COMPANY_LOGO_SLIDER'
+    'companylogoslider': 'COMPANY_LOGO_SLIDER',
+    'avatarblock': 'AVATAR_BLOCK'
 };
 
 // CSS class signatures mapped to widget types
@@ -63,7 +66,8 @@ const CSS_SIGNATURES = [
     { classes: ['feedspace-element-horizontal-scroll-widget', 'feedspace-left-right-shadow'], type: 'MARQUEE_LEFTRIGHT' },
     { classes: ['feedspace-single-review-widget', 'single-slider', 'feedspace-single-slider'], type: 'SINGLE_SLIDER' },
     { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' },
-    { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider'], type: 'AVATAR_CAROUSEL' }
+    { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider'], type: 'AVATAR_CAROUSEL' },
+    { classes: ['feedspace-avatar-block', 'fe-avatar-block'], type: 'AVATAR_BLOCK' }
 ];
 
 // ── VALID WIDGET TYPE IDs ────────────────────────────────────────────────────

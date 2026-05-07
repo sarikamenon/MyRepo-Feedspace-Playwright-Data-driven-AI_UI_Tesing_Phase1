@@ -1,8 +1,32 @@
 {
     "data": [
         {
-            "url": "https://reviews.eskk.co.uk/widget/41173293-eb45-43bb-a9d3-84a404f277d5",
-            "type": "avatar_group",
+            "url": "https://dev.southendpharmacystore.com/feedspace-dev-testarea/",
+            "type": "marquee_leftright",
+            "configurations": {
+                "custom_css": null,
+                "is_autoplay": "1"
+            }
+        },
+        {
+            "url": "https://testimonial.southendpharmacystore.com/widget/8ca85594-e5f6-4ad9-982f-aa4e79b048da",
+            "type": "marquee_stripe",
+            "configurations": {
+                "custom_css": null,
+                "is_autoplay": "1"
+            }
+        },
+        {
+            "url": "https://testimonial.southendpharmacystore.com/widget/c925844d-9530-494e-ba47-846791501426",
+            "type": "marquee_stripe",
+            "configurations": {
+                "custom_css": null,
+                "is_autoplay": "1"
+            }
+        },
+        {
+            "url": "https://testimonial.southendpharmacystore.com/widget/ef8f9e23-957d-494c-a484-f42dea0d5b14",
+            "type": "marquee_updown",
             "configurations": {
                 "custom_css": null,
                 "is_autoplay": "1"
