@@ -7,7 +7,7 @@ class AIEngine {
         this.apiKey = process.env.GEMINI_API_KEY;
         if (this.apiKey) {
             this.genAI = new GoogleGenerativeAI(this.apiKey);
-            this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+            this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         } else {
             console.warn("[AIEngine] GEMINI_API_KEY is not set. AI validation will return mock data.");
         }
@@ -146,13 +146,13 @@ class AIEngine {
                     // For 429 errors, the Gemini quota (RPM) usually resets every 60 seconds.
                     // We enforce a minimum 60s wait for 429s to ensure the quota is actually cleared.
                     const isRateLimit = error.message.includes('429') || error.status === 429;
-                    const delay = isRateLimit 
+                    const delay = isRateLimit
                         ? Math.max(60000, this.initialDelay * Math.pow(2, attempts - 1)) // Force 60s for 429
                         : this.initialDelay * Math.pow(2, attempts - 1);
 
                     const reason = isRateLimit ? 'Gemini Rate Limit (429)' : (isRetriable ? 'Service Unavailable (503)' : 'Transient network error');
                     console.warn(`[AIEngine] 🚨 ${reason}. Quota exhausted? Waiting ${delay / 1000}s for reset... (Attempt ${attempts}/${this.maxRetries})`);
-                    
+
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
@@ -189,17 +189,17 @@ class AIEngine {
         if (!aiData) return null;
 
         // Detect Empty State signal (Harden the detection)
-        const isEmptyState = (geometricWarnings || []).some(w => 
-            w.includes('EMPTY_STATE_FORCE_PASS') || 
+        const isEmptyState = (geometricWarnings || []).some(w =>
+            w.includes('EMPTY_STATE_FORCE_PASS') ||
             w.toLowerCase().includes('zero reviews') ||
             w.toLowerCase().includes('currently empty')
         );
 
         if (isEmptyState && aiData.feature_results) {
             console.log(`[AIEngine] 🛡️ Empty State remediation engaged for ${widgetType}.`);
-            
+
             const cardLevelFeatures = [
-                "Show Review Date", "Show Review Ratings", "Read More", 
+                "Show Review Date", "Show Review Ratings", "Read More",
                 "Show Social Platform Icon", "Review Image / Avatar", "Show Star Ratings"
             ];
 
@@ -499,10 +499,9 @@ class AIEngine {
                     const searchId = feed.id?.toString();
                     const lowerIden = cardIdentifier.toLowerCase();
 
-                    return name.includes(lowerIden) ||
+                    return lowerIden !== "an" && (name.includes(lowerIden) ||
                         lowerIden.includes(name) ||
-                        searchId === lowerIden ||
-                        lowerIden === "an";
+                        searchId === lowerIden);
                 });
 
                 // Fallback: If only one card exists, use the first feed
@@ -578,10 +577,10 @@ class AIEngine {
         // --- EMPTY STATE REMEDIATION ---
         if (isEmptyState && aiData.feature_results) {
             const cardLevelFeatures = [
-                "Show Review Date", "Show Review Ratings", "Read More", 
+                "Show Review Date", "Show Review Ratings", "Read More",
                 "Show Social Platform Icon", "Review Image / Avatar", "Show Star Ratings"
             ];
-            
+
             aiData.feature_results.forEach(f => {
                 const isCardFeature = cardLevelFeatures.includes(f.feature);
                 // If it failed because it was absent, but it's a card feature on an empty widget, force PASS
@@ -595,26 +594,26 @@ class AIEngine {
 
         // 🛡️ TOTAL TRUTH OVERRIDE: Synchronize mathematical defects ONLY for confirmed FAILURES
         if (geometricWarnings && geometricWarnings.length > 0) {
-            const clinicalDefects = geometricWarnings.filter(msg => 
-                (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') || 
-                msg.includes('PARTIAL') || msg.includes('CUT')) && 
+            const clinicalDefects = geometricWarnings.filter(msg =>
+                (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') ||
+                    msg.includes('PARTIAL') || msg.includes('CUT')) &&
                 !msg.includes('SYMMETRY_SIGNAL') &&
                 !msg.includes('EMPTY_STATE_FORCE_PASS') // Never force FAIL based on empty state
             );
-            
+
             if (clinicalDefects.length > 0) {
                 console.log(`[AIEngine] 🛡️ TRUTH OVERRIDE: Clinical boundary violation detected. Forcing FAIL.`);
-                
+
                 if (aiData.aesthetic_results) {
                     clinicalDefects.forEach(defect => {
-                        let targetCategory = "A."; 
+                        let targetCategory = "A.";
                         if (defect.includes('SHARP') || defect.includes('MEDIA')) targetCategory = "E.";
                         if (defect.includes('POPUP') || defect.includes('MODAL')) targetCategory = "G.";
-                        
-                        const catObj = aiData.aesthetic_results.find(r => 
+
+                        const catObj = aiData.aesthetic_results.find(r =>
                             r.category.toUpperCase().includes(targetCategory.toUpperCase())
                         );
-                        
+
                         if (catObj) {
                             catObj.status = 'FAIL';
                             catObj.issue = `[CRITICAL] Mathematical Audit override: ${defect}`;
@@ -631,7 +630,7 @@ class AIEngine {
         if (aiData.overall_status === 'FAIL' && aiData.aesthetic_results) {
             const anyAestheticFail = aiData.aesthetic_results.some(r => r.status === 'FAIL');
             const anyFeatureFail = aiData.feature_results.some(r => r.status === 'FAIL');
-            
+
             if (!anyAestheticFail && !anyFeatureFail) {
                 console.log('[AIEngine] ⚠️ Consistency violation: Overall FAIL with all PASS results. Forcing Category A to FAIL.');
                 const aCat = aiData.aesthetic_results.find(r => r.category.includes('A.'));

@@ -22,6 +22,7 @@ const AvatarSliderHelper = require('./interactiveWidgets/avatarSliderHelper');  
 const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper');
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
 const MasonryHelper = require('./interactiveWidgets/masonryHelper');
+const AvatarBlockHelper = require('./interactiveWidgets/avatarBlockHelper');
 
 // All Feedspace widget selectors — ordered from most specific to least specific
 const FEEDSPACE_SELECTORS = [
@@ -675,7 +676,8 @@ class PlaywrightHelper {
                     'GRID': 'masonryFeature',
                     'MARQUEE_UPDOWN': 'verticalScrollFeature',
                     'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-                    'FLOATING_TOAST': 'floatingCardsFeature'
+                    'FLOATING_TOAST': 'floatingCardsFeature',
+                    'AVATAR_BLOCK': 'avatarBlockFeature'
                 };
                 const lookupType = this.widgetType || this.expectedType;
                 if (lookupType && lookupType !== 'Unknown' && lookupType !== '--url') {
@@ -824,8 +826,13 @@ class PlaywrightHelper {
                     this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
                 if (!domTruth.starsFound && domTruth.itemCount > 0) {
-                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
-                    this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
+                    if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP'].includes(normalizedType)) {
+                        console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND on base widget. AI must check expanded popups.`);
+                        this.geometricWarnings.push(`DOM_TRUTH: Base widget has no stars. For ${normalizedType}, stars are inside the expanded review popups. Check the popup screenshots to confirm.`);
+                    } else {
+                        console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND within widget.`);
+                        this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
+                    }
                 }
             } else {
                 console.warn('[PlaywrightHelper] Skipping DOM Sniff: No valid widget locator found.');
@@ -922,6 +929,9 @@ class PlaywrightHelper {
 
             } else if (normalizedType === 'AVATAR_GROUP') {
                 const shots = await AvatarGroupHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+            } else if (normalizedType === 'AVATAR_BLOCK') {
+                const shots = await AvatarBlockHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
             }
 

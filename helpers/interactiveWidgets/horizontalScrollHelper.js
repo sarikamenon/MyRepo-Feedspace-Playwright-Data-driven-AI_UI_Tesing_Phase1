@@ -17,19 +17,17 @@ class HorizontalScrollHelper {
         const page = context.page ? context.page() : context;
 
         try {
-            // 🛡️ Prevent "Freezing": Move mouse to safe corner and force animations
-            await page.mouse.move(0, 0);
+            // 🛡️ Prevent Motion Blur: Freeze animations before capture
             await page.addStyleTag({
                 content: `
                     * { 
-                        animation-play-state: running !important; 
+                        animation-play-state: paused !important; 
+                        transition-duration: 0s !important;
                         transition-property: none !important;
-                    }
-                    *:hover { 
-                        animation-play-state: running !important; 
                     }
                 `
             }).catch(() => null);
+            await page.waitForTimeout(500); // Stabilization wait
 
             // Warmup: Scroll slightly to wake up rendering pipeline in headless
             await page.evaluate(() => window.scrollBy(0, 1));
