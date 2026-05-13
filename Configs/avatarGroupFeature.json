@@ -1,9 +1,10 @@
 {
     "features": [
+        "Show Star Ratings",
         "Show Review Ratings",
         "Show Social Platform Icon",
         "Read More",
-        "Review Date",
+        "Show Review Date",
         "Inline CTA",
         "Feedspace Branding"
     ],

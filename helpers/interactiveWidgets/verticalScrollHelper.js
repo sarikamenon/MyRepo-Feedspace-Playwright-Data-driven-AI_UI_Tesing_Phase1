@@ -106,6 +106,30 @@ class VerticalScrollHelper {
             const buf3 = await widgetLocator.screenshot({ animations: 'allow' }).catch(() => null);
             if (buf3) screenshots.push(buf3);
 
+            // 3️⃣ Read More Interaction (New Requirement)
+            console.log('[VerticalScrollHelper] Scanning for "Read More" button to trigger popup...');
+            const readMoreSelectors = ['.fe-read-more', '.feedspace-read-more', 'a:has-text("Read more")', 'span:has-text("Read more")'];
+            const readMoreBtn = widgetLocator.locator(readMoreSelectors.join(', ')).filter({ visible: true }).first();
+
+            if (await readMoreBtn.isVisible().catch(() => false)) {
+                console.log('[VerticalScrollHelper] "Read More" button found. Clicking...');
+                await readMoreBtn.click({ force: true }).catch(err => console.warn(`[VerticalScrollHelper] Click failed: ${err.message}`));
+                
+                // Wait for popup to manifest
+                await page.waitForTimeout(1500);
+                const popupSels = ['.fe-review-box', '.fe-review-box-inner', '[class*="review-box"]', '.feedspace-avatar-tooltip'];
+                const popup = page.locator(popupSels.join(', ')).filter({ visible: true }).first();
+                
+                if (await popup.isVisible().catch(() => false)) {
+                    console.log('[VerticalScrollHelper] Popup detected. Capturing full-page state...');
+                    const popupShot = await page.screenshot({ fullPage: true, animations: 'disabled' }).catch(() => null);
+                    if (popupShot) screenshots.push(popupShot);
+                    
+                    // Add a system warning to the AI about the open popup
+                    geometricWarnings.push("POPUP_DETECTED: A 'Read More' popup is currently OPEN and visible in the full-page screenshot. Audit Rule 7 and Rule 14 inside this popup.");
+                }
+            }
+
             // 3️⃣ Analysis Logic - COMMENTED OUT FOR NOW
             /*
             if (columnCount === 0) {
