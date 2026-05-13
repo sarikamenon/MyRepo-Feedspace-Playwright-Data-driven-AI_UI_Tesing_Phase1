@@ -24,6 +24,9 @@ const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHel
 const MasonryHelper = require('./interactiveWidgets/masonryHelper');
 const AvatarBlockHelper = require('./interactiveWidgets/avatarBlockHelper');
 
+const MAX_SCREENSHOT_HEIGHT = 10000;
+
+
 // All Feedspace widget selectors — ordered from most specific to least specific
 const FEEDSPACE_SELECTORS = [
     '.feedspace-shadow-container',
@@ -59,12 +62,12 @@ const FEEDSPACE_SELECTORS = [
     'iframe[src*="feedspace.io"]',
     'div[id*="feedspace"]',
     '[data-fs-processed]',
-    '[data-widget-type]',
-    '[data-type]',
-    '[data-id]',
-    '[unique_widget_id]',
+    // Narrowed attributes to prevent collisions with page builders
     '[widget_type_id]',
-    '[data-feedspace-type]'
+    '[data-feedspace-type]',
+    '[unique_widget_id]',
+    '[data-widget-type*="feedspace"]',
+    '[id*="feedspace-widget"]'
 ];
 
 const SELECTOR_STRING = FEEDSPACE_SELECTORS.join(', ');
@@ -73,6 +76,9 @@ const DISTRACTION_SELECTORS = [
     '.trustpilot-widget',
     '[id*="trustpilot"]',
     '.chat-bubble',
+    '.wa__btn_popup',
+    '.wa__popup_chat_box',
+    '#recent_admissions',
     '.iubenda-cs-container',
     '#iubenda-cs-banner',
     '[id*="cookie"]',
@@ -612,9 +618,25 @@ class PlaywrightHelper {
                     console.log(`[PlaywrightHelper] 💡 Config Hint Detection: Using ${configHint} based on unique property keys.`);
                     this.widgetType = configHint;
                 } else if (locator && this.expectedType !== 'Unknown' && (detectedType === 'CAROUSEL_SLIDER' || detectedType === 'Unknown')) {
-                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, trust the config ONLY if a locator was found.
-                    console.log(`[PlaywrightHelper] 🛡️  Expected Override: Config explicitly requested ${this.expectedType}. Overriding detected ${detectedType}.`);
-                    this.widgetType = this.expectedType;
+                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, 
+                    // trust the config ONLY if a locator was found and it has Feedspace signatures.
+                    const isRealFeedspace = await locator.evaluate(el => {
+                        const classes = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+                        const html = el.innerHTML ? el.innerHTML.toLowerCase() : '';
+                        const hasAttr = Array.from(el.attributes).some(attr => 
+                            attr.name.includes('feedspace') || attr.value.includes('feedspace') || 
+                            attr.name.includes('unique_widget_id') || attr.name.includes('widget_type_id')
+                        );
+                        return classes.includes('feedspace') || classes.includes('fe-') || html.includes('feedspace') || hasAttr;
+                    }).catch(() => false);
+
+                    if (isRealFeedspace) {
+                        console.log(`[PlaywrightHelper] 🛡️  Expected Override: Config explicitly requested ${this.expectedType}. Overriding detected ${detectedType}.`);
+                        this.widgetType = this.expectedType;
+                    } else {
+                        console.warn(`[PlaywrightHelper] 🛡️  Override Blocked: Found locator but it lacks Feedspace signatures. Avoiding Ghost Pass.`);
+                        this.widgetType = 'Unknown';
+                    }
                 } else if (detectedType !== 'Unknown') {
                     this.widgetType = detectedType;
                 } else {
@@ -635,6 +657,21 @@ class PlaywrightHelper {
                 if (this.widgetType === 'AVATAR_CAROUSEL' || this.widgetType === 'AVATAR_GROUP') {
                     console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing FLOATING_TOAST identification. Mis-routing blocked for ${this.widgetType}.`);
                     this.widgetType = 'FLOATING_TOAST';
+                }
+            }
+
+            if (this.expectedType === 'AVATAR_GROUP' || this.expectedType === 'AVATAR_BLOCK' || this.expectedType === 'AVATAR_CAROUSEL') {
+                const genericSliders = ['CAROUSEL_SLIDER', 'SINGLE_SLIDER', 'UNKNOWN'];
+                if (genericSliders.includes(this.widgetType.toUpperCase())) {
+                    console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing ${this.expectedType} identification over detected ${this.widgetType}.`);
+                    this.widgetType = this.expectedType;
+                }
+            }
+
+            if (this.expectedType === 'COMPANY_LOGO_SLIDER') {
+                if (this.widgetType === 'MARQUEE_STRIPE' || this.widgetType === 'CAROUSEL_SLIDER' || this.widgetType === 'Unknown') {
+                    console.log(`[PlaywrightHelper] 🛡️  Truth Override: Forcing COMPANY_LOGO_SLIDER identification over detected ${this.widgetType}.`);
+                    this.widgetType = 'COMPANY_LOGO_SLIDER';
                 }
             }
 
@@ -710,17 +747,17 @@ class PlaywrightHelper {
                 selectors.forEach(sel => {
                     try {
                         document.querySelectorAll(sel).forEach(el => {
-                            // High-risk: only hide if it's definitely a cookie banner or trustpilot
-                            const text = el.innerText ? el.innerText.toLowerCase() : '';
-                            const isCookie = text.includes('cookie') || text.includes('accept');
-                            const isTrustpilot = el.className && typeof el.className === 'string' && el.className.includes('trustpilot');
-
-                            if (isCookie || isTrustpilot) {
-                                el.style.setProperty('display', 'none', 'important');
-                            }
+                            el.style.setProperty('display', 'none', 'important');
+                            el.style.setProperty('visibility', 'hidden', 'important');
+                            el.style.setProperty('opacity', '0', 'important');
                         });
                     } catch (e) { }
                 });
+
+                // Inject global CSS to handle late-loading elements
+                const style = document.createElement('style');
+                style.textContent = selectors.map(s => `${s} { display: none !important; visibility: hidden !important; opacity: 0 !important; }`).join('\n');
+                document.head.appendChild(style);
             }, DISTRACTION_SELECTORS);
 
             if (normalizedType !== 'FLOATING_TOAST') {
@@ -763,15 +800,27 @@ class PlaywrightHelper {
                 while (pollAttempts < maxPolls) {
                     pollAttempts++;
                     domTruth = await locator.evaluate(el => {
-                        const iconSels = ['.feedspace-d6-header-icon', '.feedspace-element-header-icon', 'img[src*="social-icons"]', 'a[aria-label*=".com"]', '[class*="platform-icon"]'];
-                        const starSels = ['.feedspace-rating', '.star-rating', 'svg[class*="star"]', '.fe-stars', '.fe-rating-icon', '[class*="rating-star"]', '.fs-stars-wrapper'];
+                        const iconSels = [
+                            '.feedspace-d6-header-icon', '.feedspace-element-header-icon', 
+                            'img[src*="social-icons"]', 'a[aria-label*=".com"]', 
+                            '[class*="platform-icon"]', '.fe-platform-icon', 
+                            '[class*="platform-logo"]', 'svg[class*="platform"]'
+                        ];
+                        const starSels = [
+                            '.feedspace-rating', '.star-rating', 'svg[class*="star"]', 
+                            '.fe-stars', '.fe-rating-icon', '[class*="rating-star"]', 
+                            '.fs-stars-wrapper', '.fs-rating-star', '.fas.fa-star', 
+                            '.far.fa-star', '[class*="star-icon"]', '[class*="star"]'
+                        ];
                         const itemSels = [
                             '.feedspace-card', '.fe-feed-item', '.review-card',
                             '[class*="feed-box"]', '[class*="review-card"]', 
                             '[class*="-element-d"]',
                             '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
                             '[data-feed-id]', '.fe-review-body', '.feedspace-body',
-                            '.carousel-item', '.fe-slick-slide', '.slick-slide'
+                            '.carousel-item', '.fe-slick-slide', '.slick-slide',
+                            '.feedspace-avatar', '.fe-avatar', '[class*="avatar"]',
+                            '.feedspace-logo', '.fe-logo', '[class*="logo"]'
                         ];
 
                         const findDeep = (root, selectors) => {
@@ -799,13 +848,15 @@ class PlaywrightHelper {
 
                         // FIX: Only call countDeep once on the root or its shadow.
                         // Recursive logic handles the rest correctly.
+                        const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
                         const context = el.shadowRoot || el;
                         const iconsFound = findDeep(context, iconSels);
                         const starsFound = findDeep(context, starSels);
+                        const brandingFound = findDeep(context, brandingSels) || !!document.querySelector(brandingSels.join(', '));
                         const itemCount = countDeep(context, itemSels);
 
-                        return { iconsFound, starsFound, itemCount };
-                    }).catch(() => ({ iconsFound: false, starsFound: false, itemCount: 0 }));
+                        return { iconsFound, starsFound, brandingFound, itemCount };
+                    }).catch(() => ({ iconsFound: false, starsFound: false, brandingFound: false, itemCount: 0 }));
 
                     if (domTruth.itemCount > 0) break;
                     if (pollAttempts < maxPolls) {
@@ -825,8 +876,12 @@ class PlaywrightHelper {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
                     this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
+                if (domTruth.brandingFound) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding DETECTED.`);
+                    this.geometricWarnings.push("DOM_TRUTH: Feedspace Branding (Pill/Badge) IS present at the bottom or edge of the widget. You MUST report it as 'Visible'. Check all provided screenshots, including the dedicated branding shot.");
+                }
                 if (!domTruth.starsFound && domTruth.itemCount > 0) {
-                    if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP'].includes(normalizedType)) {
+                    if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND on base widget. AI must check expanded popups.`);
                         this.geometricWarnings.push(`DOM_TRUTH: Base widget has no stars. For ${normalizedType}, stars are inside the expanded review popups. Check the popup screenshots to confirm.`);
                     } else {
@@ -924,7 +979,7 @@ class PlaywrightHelper {
                 if (screenshots?.length > 0) screenshotBuffers.push(...screenshots);
 
             } else if (normalizedType === 'MASONRY' || normalizedType === 'GRID') {
-                const shots = await MasonryHelper.interact(interactionContext, locator, this.geometricWarnings);
+                const shots = await MasonryHelper.interact(interactionContext, locator, this.config, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'AVATAR_GROUP') {
@@ -945,6 +1000,19 @@ class PlaywrightHelper {
                 }
             }
 
+            // ── STEP 7.5: Branding-Specific Capture (Prevent Clipping) ──────
+            if (domTruth.brandingFound) {
+                const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
+                const branding = this.page.locator(brandingSels.join(', ')).filter({ visible: true }).first();
+                if (await branding.isVisible().catch(() => false)) {
+                    const brandingShot = await branding.screenshot({ animations: 'disabled' }).catch(() => null);
+                    if (brandingShot) {
+                        console.log('[PlaywrightHelper] Branding captured via dedicated screenshot.');
+                        screenshotBuffers.push(brandingShot);
+                    }
+                }
+            }
+
             // ── STEP 8: Viewport-context screenshot for AI ───────────────────
             // CRITICAL: We use fullPage: false by default to catch truncation.
             // However, for MASONRY (Wall of Love), we add a fullPage: true shot to see the whole wall.
@@ -952,13 +1020,14 @@ class PlaywrightHelper {
                 const isWall = (normalizedType === 'MASONRY' || normalizedType === 'GRID');
 
                 // Final Viewport Shot (Catch truncation)
-                const viewportShot = await this.page.screenshot({ fullPage: false, animations: 'disabled' });
+                const viewportShot = await this._safeScreenshot(this.page, { fullPage: false });
                 if (viewportShot) screenshotBuffers.push(viewportShot);
 
-                // Full Page Shot (Context for long widgets)
-                if (isWall) {
-                    console.log('[PlaywrightHelper] Capturing Full Page shot for Wall of Love context.');
-                    const fullShot = await this.page.screenshot({ fullPage: true, animations: 'disabled' }).catch(() => null);
+                // Full Page Shot (Context for long widgets or popups)
+                const hasPopup = this.geometricWarnings.some(w => w.includes('POPUP_DETECTED'));
+                if (isWall || hasPopup) {
+                    console.log(`[PlaywrightHelper] Capturing Full Page shot (${isWall ? 'Wall' : 'Popup'} context).`);
+                    const fullShot = await this._safeScreenshot(this.page, { fullPage: true });
                     if (fullShot) screenshotBuffers.push(fullShot);
                 }
             }
@@ -1204,7 +1273,7 @@ class PlaywrightHelper {
                     await this._expandReadMore(context);
                     // Smart scroll: Ensure we see the NEWLY loaded area
                     await context.evaluate(() => window.scrollBy(0, 400)).catch(() => { });
-                    const shot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
+                    const shot = await this._safeScreenshot(context, {});
                     if (shot) screenshotBuffers.push(shot);
                 }
 
@@ -1222,6 +1291,31 @@ class PlaywrightHelper {
         }
 
         console.log(`[PlaywrightHelper] ✅ Storyboard sequence complete with ${screenshotBuffers.length} images.`);
+    }
+
+    /**
+     * Injects CSS to freeze all animations and transitions.
+     * Prevents motion-blur hallucinations on moving widgets (Marquees/Sliders).
+     */
+    async _pauseAnimations() {
+        try {
+            console.log('[PlaywrightHelper] ❄️ Freezing animations...');
+            await this.page.addStyleTag({
+                content: `
+                    *, *::before, *::after {
+                        animation-play-state: paused !important;
+                        transition-duration: 0s !important;
+                        transition-property: none !important;
+                        animation-duration: 0s !important;
+                        animation-iteration-count: 1 !important;
+                        scroll-behavior: auto !important;
+                    }
+                `
+            }).catch(() => null);
+            await this._sleep(500); // Stabilization wait
+        } catch (e) {
+            console.warn('[PlaywrightHelper] Animation freeze failed:', e.message);
+        }
     }
 
     /**
@@ -1264,6 +1358,19 @@ class PlaywrightHelper {
      */
     async _expandReadMore(containerLocator) {
         if (!containerLocator) return;
+
+        // 🛡️ Guard: Skip expansion for Marquee/Slider widgets to prevent "Slice Fail" layout defects
+        const isConstrained = this.widgetType && (
+            this.widgetType.includes('MARQUEE') || 
+            this.widgetType.includes('SLIDER') ||
+            this.widgetType.includes('CAROUSEL')
+        );
+
+        if (isConstrained) {
+            console.log(`[PlaywrightHelper] 🛡️ Skipping 'Read More' expansion for constrained widget type: ${this.widgetType}`);
+            return;
+        }
+
         try {
             // Find all elements containing "Read More" (buttons, links, or spans)
             // We use a broader selector and filter by visibility
@@ -1292,6 +1399,66 @@ class PlaywrightHelper {
 
     _sleep(ms) {
         return new Promise(r => setTimeout(r, ms));
+    }
+
+    /**
+     * Safe Screenshot Wrapper: Prevents 400 API errors by capping dimensions.
+     */
+    async _safeScreenshot(target, options = {}) {
+        try {
+            if (!target || this.page.isClosed()) return null;
+
+            const isPage = target === this.page;
+            let height = 0;
+            let width = 0;
+
+            if (isPage) {
+                const size = this.page.viewportSize();
+                width = size ? size.width : 1536;
+                height = await this.page.evaluate(() => document.documentElement.scrollHeight).catch(() => 0);
+            } else {
+                const box = await target.boundingBox().catch(() => null);
+                if (box) {
+                    width = box.width;
+                    height = box.height;
+                }
+            }
+
+            const screenshotOptions = { ...options, animations: 'disabled' };
+
+            // If we are doing fullPage or the target element is too tall, we must cap it
+            const shouldCap = (options.fullPage || !isPage) && height > MAX_SCREENSHOT_HEIGHT;
+
+            if (shouldCap) {
+                console.warn(`[PlaywrightHelper] 🛡️  Dimension Guard: Target height (${Math.round(height)}px) exceeds safety limit. Capping at ${MAX_SCREENSHOT_HEIGHT}px.`);
+                
+                const originalSize = this.page.viewportSize();
+                const targetWidth = width || (originalSize ? originalSize.width : 1536);
+                
+                try {
+                    await this.page.setViewportSize({ 
+                        width: Math.round(targetWidth), 
+                        height: MAX_SCREENSHOT_HEIGHT 
+                    });
+                    
+                    const shot = await target.screenshot({ ...screenshotOptions, fullPage: false }).catch(() => null);
+                    
+                    if (originalSize) await this.page.setViewportSize(originalSize).catch(() => {});
+                    return shot;
+                } catch (vpError) {
+                    console.error(`[PlaywrightHelper] Viewport expansion failed: ${vpError.message}`);
+                    // Fallback to normal screenshot if viewport expansion fails
+                }
+            }
+
+            return await target.screenshot(screenshotOptions).catch((e) => {
+                console.error(`[PlaywrightHelper] Screenshot failed: ${e.message}`);
+                return null;
+            });
+        } catch (e) {
+            console.error(`[PlaywrightHelper] Safe screenshot error: ${e.message}`);
+            return null;
+        }
     }
 }
 

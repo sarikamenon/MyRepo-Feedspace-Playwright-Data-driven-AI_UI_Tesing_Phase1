@@ -17,25 +17,34 @@ class HorizontalScrollHelper {
         const page = context.page ? context.page() : context;
 
         try {
-            // 🛡️ Prevent Motion Blur: Freeze animations before capture
-            await page.addStyleTag({
-                content: `
-                    * { 
-                        animation-play-state: paused !important; 
-                        transition-duration: 0s !important;
-                        transition-property: none !important;
+            // 🛡️ Animation Controls for Motion-Blur Free Sequential Captures
+            const pauseAnimations = async () => {
+                await page.evaluate(() => {
+                    let style = document.getElementById('fs-freeze-motion');
+                    if (!style) {
+                        style = document.createElement('style');
+                        style.id = 'fs-freeze-motion';
+                        style.textContent = '* { animation-play-state: paused !important; transition-duration: 0s !important; transition-property: none !important; }';
+                        document.head.appendChild(style);
                     }
-                `
-            }).catch(() => null);
-            await page.waitForTimeout(500); // Stabilization wait
+                }).catch(() => null);
+                await page.waitForTimeout(500); // Stabilization wait
+            };
+
+            const resumeAnimations = async () => {
+                await page.evaluate(() => {
+                    const style = document.getElementById('fs-freeze-motion');
+                    if (style) style.remove();
+                }).catch(() => null);
+            };
 
             // Warmup: Scroll slightly to wake up rendering pipeline in headless
             await page.evaluate(() => window.scrollBy(0, 1));
             await page.waitForTimeout(100);
             await page.evaluate(() => window.scrollBy(0, -1));
             
-            // 🟢 Expand "Read More" if present
-            await this._tryExpandReadMore(widgetLocator);
+            // 🟢 Skip "Read More" expansion for Marquee (prevents layout "Slice Fail" in constrained containers)
+            // await this._tryExpandReadMore(widgetLocator);
 
             // 1️⃣ Identify rows - try common classes or containers with horizontal flow
             const rowSelectors = [
@@ -99,33 +108,68 @@ class HorizontalScrollHelper {
                 }
             }
 
-            // 2️⃣ Capture Sequence (3 shots with 2s delay)
+            // 2️⃣ Capture Sequence (3 shots with programmatic time-jumping)
             console.log(`[HorizontalScrollHelper] Tracking ${rowCount} rows. Proceeding with 3 capture phases...`);
 
+            const shiftWidget = async () => {
+                await page.evaluate(() => {
+                    // 1. Fast-forward all CSS animations by 8 seconds (Marquee)
+                    const walkShadows = (root) => {
+                        if (root.getAnimations) {
+                            root.getAnimations().forEach(anim => {
+                                if (anim.currentTime !== null) anim.currentTime += 8000;
+                            });
+                        }
+                        root.querySelectorAll('*').forEach(el => {
+                            if (el.shadowRoot) walkShadows(el.shadowRoot);
+                        });
+                    };
+                    walkShadows(document);
+
+                    // 2. Forcefully scroll containers (Carousel/Scroll based)
+                    const selectors = '.feedspace-elements-wrapper, .marquee-row, .carousel_slider, [class*="elements-wrapper"], .feedspace-marquee-inner, [class*="scroll"]';
+                    const walkShadowsForScroll = (root) => {
+                        root.querySelectorAll(selectors).forEach(el => {
+                            if (el.scrollWidth > el.clientWidth) {
+                                el.scrollLeft += 400; // Shift by 400px
+                            }
+                        });
+                        root.querySelectorAll('*').forEach(el => {
+                            if (el.shadowRoot) walkShadowsForScroll(el.shadowRoot);
+                        });
+                    };
+                    walkShadowsForScroll(document);
+                }).catch(() => null);
+                
+                await page.waitForTimeout(500); // Paint buffer
+            };
+
             // Phase 1
+            await pauseAnimations();
             const initialStates = rowCount > 0 ? await this.getPositions(rows) : null;
             if (initialStates) this.logPositions('Initial', initialStates);
 
             const buf1 = await widgetLocator.screenshot({ animations: 'disabled' }).catch(() => null);
             if (buf1) screenshots.push(buf1);
 
-            await page.waitForTimeout(2000);
-
             // Phase 2
+            await shiftWidget();
             const midStates = rowCount > 0 ? await this.getPositions(rows) : null;
             if (midStates) this.logPositions('Midway', midStates);
 
             const buf2 = await widgetLocator.screenshot({ animations: 'disabled' }).catch(() => null);
             if (buf2) screenshots.push(buf2);
 
-            await page.waitForTimeout(2000);
-
             // Phase 3
+            await shiftWidget();
             const finalStates = rowCount > 0 ? await this.getPositions(rows) : null;
             if (finalStates) this.logPositions('Final', finalStates);
 
             const buf3 = await widgetLocator.screenshot({ animations: 'disabled' }).catch(() => null);
             if (buf3) screenshots.push(buf3);
+            
+            // Cleanup
+            await resumeAnimations();
 
             // 3️⃣ Analysis Logic - COMMENTED OUT FOR NOW
             /*
