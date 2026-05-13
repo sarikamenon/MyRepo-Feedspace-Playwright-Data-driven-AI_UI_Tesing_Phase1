@@ -37,9 +37,15 @@ class AIEngine {
             return this.getMockResult(widgetType);
         }
 
-        const buffers = Array.isArray(imageBuffers) ? imageBuffers : [imageBuffers];
-        let attempts = 0;
+        let buffers = Array.isArray(imageBuffers) ? imageBuffers : [imageBuffers];
+        
+        // 🛡️ API SAFETY LIMIT: Truncate to 14 images to avoid 400 errors (Payload size or image count limits)
+        if (buffers.length > 14) {
+            console.warn(`[AIEngine] ⚠️  Multi-image payload too large (${buffers.length} images). Truncating to 14 to prevent 400 error.`);
+            buffers = buffers.slice(0, 14);
+        }
 
+        let attempts = 0;
         while (attempts <= this.maxRetries) {
             let text = "";
             try {
@@ -51,11 +57,11 @@ class AIEngine {
                 const imageParts = buffers.map(buffer => ({
                     inlineData: {
                         data: buffer.toString("base64"),
-                        mimeType: "image/png",
+                        mimeType: buffer.length > 2 && buffer[0] === 0xFF && buffer[1] === 0xD8 ? "image/jpeg" : "image/png",
                     },
                 }));
 
-                console.log(`[AIEngine] Sending screenshot to Gemini for ${widgetType} validation (Attempt ${attempts})...`);
+                console.log(`[AIEngine] Sending ${buffers.length} screenshot(s) to Gemini for ${widgetType} validation (Attempt ${attempts})...`);
                 const result = await this.model.generateContent([prompt, ...imageParts]);
                 const response = await result.response;
                 text = response.text().trim();
@@ -253,21 +259,27 @@ class AIEngine {
                 "json-leakage", "raw-code", "json-leak"
             ];
 
-            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with"];
+            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with", "expected", "intended", "required", "normal behavior", "without", "free from", "no evidence of"];
 
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
 
-                // Split on separator and take only the answer part
+                // ── Split on Question or Answer separators ──
+                // If the line contains a '?', we treat everything after it as the answer.
+                // Otherwise, we look for '→', '->', or ':'.
                 let answerPart = trimmedLine;
-                const separators = ['→', '->', ':'];
+                const separators = ['?', '→', '->', ':'];
+                
+                // Find the LAST separator to ensure we get the most specific answer part
+                let lastIdx = -1;
                 for (const sep of separators) {
-                    if (trimmedLine.includes(sep)) {
-                        const parts = trimmedLine.split(sep);
-                        answerPart = parts[parts.length - 1].trim();
-                        break;
-                    }
+                    const idx = trimmedLine.lastIndexOf(sep);
+                    if (idx > lastIdx) lastIdx = idx;
+                }
+
+                if (lastIdx !== -1) {
+                    answerPart = trimmedLine.substring(lastIdx + 1).trim();
                 }
 
                 const lowAnswer = answerPart.toLowerCase();
@@ -348,7 +360,7 @@ class AIEngine {
         };
 
         // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
-        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "truncated", "cut off", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "SYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
+        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "SYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
         const layoutLine = findAdmission(layoutKeywords);
         const mentionsLayoutIssue = (
             analysisMessage.includes("FAIL_LAYOUT_CLIPPED") ||
@@ -535,6 +547,9 @@ class AIEngine {
                             (!matchingFeed.social_platform && !matchingFeed.review_url);
                     } else if (isDateTrait) {
                         hasNullData = !matchingFeed.review_at;
+                    } else if (trait.toLowerCase().replace(/ /g, "").includes("readmore")) {
+                        const showFullConfig = (f.config_status === "Visible" || f.config_status?.includes("Visible")) ? "0" : "1";
+                        hasNullData = (showFullConfig === "1"); // If show_full_review is 1, Read More should be Absent (null data for the button)
                     }
 
                     const realId = matchingFeed.id || "[Unknown ID]";
