@@ -961,7 +961,7 @@ class PlaywrightHelper {
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'SINGLE_SLIDER' || normalizedType === 'AVATAR_SLIDER') {
-                const shots = await AvatarSliderHelper.interact(interactionContext, locator, this.geometricWarnings);
+                const shots = await AvatarSliderHelper.interact(interactionContext, locator, this.config, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
 
             } else if (normalizedType === 'MARQUEE_UPDOWN') {

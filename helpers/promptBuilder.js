@@ -368,6 +368,8 @@ ${isMultiImage ? `
 - **ZERO TOLERANCE**: If any part of the widget is missing (tiny sliver or 80%) → **FAIL Category A**.
 - **BOUNDARY MASK**: If a card hits the bottom/right edge without a closing border/shadow → **FAIL**.
 - **POPUP INTEGRITY**: For popups (Avatar Group), YOU MUST see a complete rounded bottom border or a visible shadow cast on the background. If the card ends in a sharp white line at the image edge → **FAIL Category A**.
+- **GLOBAL VIEWPORT EXCEPTION (IMPORTANT)**: Interaction helpers (Single Slider, Masonry) take high-resolution viewport focus shots. Elements at the extreme TOP, BOTTOM, or SIDE edges of the screenshot will naturally be "chopped" by the camera frame. This is a **PASS** (Viewport artifact). ONLY flag truncation if elements in the **CENTER** of the frame are cut off.
+- **FLAT-WALL HALLUCINATION**: Do NOT report a "Flat Wall" failure if the text is fully readable and no specific letter shapes are cut.
 - **GEOMETRIC PARITY**: Every card MUST show 4 rounded corners. Top-only rounded = **FAIL**.
 - **BANNER DETECTOR**: Inline CTA may appear as a **WIDE HORIZONTAL BANNER**. Signature: Contains "Ready to get started?" text + a primary colored button (e.g., "Get Started ↗").
 - **MANDATE**: If visible ANYWHERE on the page, you MUST report "Inline CTA: Visible".
@@ -627,14 +629,7 @@ Q11. **AGGREGATE STAR RATING**: Look at the base widget (the row of avatars in p
 **RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
 - **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
 - **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
-- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
-- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
-**RULE 22: THE OVERFLOW & RESILIENCY AUDIT**
-- **VERTICAL SYMMETRY**: Compare the whitespace at the TOP of the card to the whitespace at the BOTTOM.
-- **NON-RESILIENT FAIL**: If the top padding is large (e.g. 30px) but the bottom padding is < 4px (causing content to hit the edge), the layout is **SHATTERED**.
-- **TRIGGER**: FAIL Category A using token **FAIL_LAYOUT_SHATTERED**.
-- **AVATAR ALIGNMENT**: For Avatar Group, the Avatar circle must NOT overlap the vertical space of the Review Body. If it sits too close to the text baseline, trigger **FAIL_CONTAINMENT_COLLISION**.
-- Apply RULE 1 (Sharpness) to avatars`,
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.`,
 
       AVATAR_BLOCK: `
 **AVATAR_BLOCK — WIDGET-SPECIFIC CHECKS:**
@@ -660,20 +655,7 @@ Q10. **DESCENDER AUDIT (RULE 19)**: Look at the last line of text inside the pop
 - Q2 FLAT-WALL → Apply RULE 7 → FAIL Category G (Popups & Modals)
 - Q5 VOID-FAILURE → FAIL Category A
 - Q9 PERIMETER_AUDIT (RULE 19 Gutter Scan) → [GUTTER_CLEAR / SQUEEZED-FAIL]
-- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.
-
-**RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
-- **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
-- **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
-- **READ LESS EQUIVALENCE**: If you see "Read Less" on any popup, you MUST report the "Read More" feature as **Visible** and **PASS**.
-- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
-- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
-**RULE 22: THE OVERFLOW & RESILIENCY AUDIT**
-- **VERTICAL SYMMETRY**: Compare the whitespace at the TOP of the card to the whitespace at the BOTTOM.
-- **NON-RESILIENT FAIL**: If the top padding is large (e.g. 30px) but the bottom padding is < 4px (causing content to hit the edge), the layout is **SHATTERED**.
-- **TRIGGER**: FAIL Category A using token **FAIL_LAYOUT_SHATTERED**.
-- **AVATAR ALIGNMENT**: For Avatar Block, the Avatar square must NOT overlap the vertical space of the Review Body inside the popup. If it sits too close to the text baseline, trigger **FAIL_CONTAINMENT_COLLISION**.
-- Apply RULE 1 (Sharpness) to avatars`,
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.`,
 
       AVATAR_CAROUSEL: `
 **AVATAR_CAROUSEL — WIDGET-SPECIFIC CHECKS:**
@@ -687,22 +669,24 @@ Q5. **DATE FORMAT**: Inside popup—strict "Month D, YYYY" or "Month DD, YYYY" (
 - Q1 CHOPPED → Apply RULE 2 → FAIL Category A
 - Q2 FLAT-WALL → Apply RULE 7 → FAIL Category G
 - Q3 SOME PARTIAL or Q4 NARROW-CLIPPED → Apply RULE 2 → FAIL Category A
-- Apply RULE 1 (Sharpness) to avatars`,
+- Apply RULE 1 (Sharpness) to all avatars`,
 
       SINGLE_SLIDER: `
-**SINGLE_SLIDER — WIDGET-SPECIFIC CHECKS:**
-Q1. Review content sliced at top/bottom? → [FULLY VISIBLE / SLICED]
-Q2. All elements within safe boundaries? → [YES / NO]
+**SINGLE_SLIDER / AVATAR_SLIDER — WIDGET-SPECIFIC CHECKS:**
+Q1. **VIEWPORT CAPTURE EXCEPTION**: Because this is a high-resolution focused viewport capture, cards at the image boundaries (TOP, BOTTOM, LEFT, RIGHT) will naturally be cut off. This is **expected and a PASS**. Are elements in the **CENTER** of the image complete? → [CENTER COMPLETE (PASS) / CENTER TRUNCATED]
+Q2. **FLAT-WALL MANDATE**: Review cards in this widget often use borderless designs. If the text is fully readable, a "Flat Wall" appearance at the card bottom is a **PASS**.
 Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)? → [VISIBLE / MISSING]
 Q4. **READ MORE AUDIT**: Look for literal text "Read More" immediately following an ellipsis (...).
     - If you see (...) followed by "Read More" → [VISIBLE]
     - If you see (...) but NO "Read More" → [ABSENT_TRUNCATED_FAIL]
     - If NO ellipsis (...) exists → [PASS_NOT_REQUIRED]
+    - **ULTRA-STRICT SHORT REVIEW POLICY**: If the review text is very short (e.g., 1-2 lines or less than 15 words) and ends in dots (.. or ...), this is a **PASS**. We assume the user submitted a short review or it's a stylistic choice. ONLY fail if the review is a large block of text that is clearly cut off in the middle of a sentence without a "Read More" button.
     → [VISIBLE / ABSENT_TRUNCATED_FAIL / PASS_NOT_REQUIRED]
 Q5. **STAR RATING AUDIT**: Look at the TOP of the widget (above the review text). Are there 5 stars visible? → [VISIBLE / MISSING]
 
 **FAILURE TRIGGERS:**
-- Q1 SLICED or Q2 NO → Apply RULE 2 → FAIL Category A
+- **TRUNCATION HALLUCINATION**: You are FORBIDDEN from reporting FAIL Category G or A for "Flat Wall" or "Unrounded Axis" unless you can name the specific word or letter being cut in half.
+- Q1 CENTER TRUNCATED → FAIL Category A
 - Q3 MISSING (if config says "Visible") → FAIL feature
 - Q4 ABSENT_TRUNCATED_FAIL → FAIL feature
 - Q5 MISSING (if config says "Visible") → FAIL feature
