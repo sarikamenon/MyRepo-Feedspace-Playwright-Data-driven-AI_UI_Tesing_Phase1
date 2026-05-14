@@ -94,7 +94,7 @@ class PromptBuilder {
         text: f.comment?.substring(0, 100) || "N/A",
         platform: f.social_platform?.name || (typeof f.social_platform === 'string' ? f.social_platform : "Unknown"),
         slug: f.social_platform?.slug || (typeof f.social_platform === 'string' ? f.social_platform : "N/A"),
-        rating: (f.rating !== null && f.rating !== undefined) ? f.rating : f.response,
+        rating: (f.rating !== null && f.rating !== undefined) ? f.rating : 0,
         feed_type: f.feed_type || "text_feed",
         url: f.display_review_url || f.review_url || "N/A",
         tracking_id: trackingId,
@@ -195,6 +195,7 @@ ${feedsJson}
     - Mandate a 15px "Safety Buffer" on the RIGHT-HAND edge of every screenshot.
     - **HORIZON FAIL**: If any part of the widget content (Arc edge, Star point, or Text character) touches the absolute right image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
     - **SUB-PIXEL CONTACT**: Even if it looks intended, if there is 0px of air between content and edge, trigger **FAIL**.
+    - **MARQUEE/SLIDER EXCEPTION**: For **COMPANY_LOGO_SLIDER**, **SINGLE_SLIDER**, and **MARQUEE** widgets, logos or cards touching the LEFT or RIGHT image boundaries are **EXPECTED** behavior and MUST be marked as **PASS**. Only fail if content is sliced at the TOP or BOTTOM edges.
 - **RULE 21: VERTICAL HIERARCHY AUDIT (AVATAR GROUPS)**:
     - Specifically audit the gap between the Avatar Row and the Text Label.
     - **COLLISION FAIL**: If a Star point touches/overlaps a letter, it is a clinical **FAIL_LAYOUT_BLOCKED**.
@@ -227,20 +228,22 @@ ${isMultiImage ? `
 ============================================================
 1. **IDENTIFY CARD**: Match the card in the screenshot to a record in **SECTION 0** using **Name**, **ID**, **Text snippet**, or **Initials** (e.g., 'AN' = 'Anonymous').
 2. **VERIFY FIELD (RATING/ICON)**:
-    - **IF (\`rating\` > 0 in Section 0)** → **Expected State: VISIBLE**. (Fail if absent).
-    - **IF (\`rating\`: null or 0 in Section 0)**:
-        - **IF (\`feed_type\`: "social_feed")** → **Expected State: ABSENT**.
-        - **VERDICT: PASS**. 
-        - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 for this social source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)"
-        - **IF (\`feed_type\`: "text_feed" AND \`rating\` = 0)** → **Expected State: ABSENT**.
-        - **VERDICT: PASS**.
-        - **IF (\`feed_type\`: "text_feed" AND \`rating\` = null)** → **Expected State: ABSENT**.
-        - **VERDICT: PASS**.
-        - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null for this text source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)"
+    - **IF (Config Status is 'Absent')**:
+        - **Expected State: ABSENT**.
+        - **VERDICT: PASS** if feature is not visible in the UI.
+        - **REMARK**: "The feature is disabled in configuration, so its absence is a PASS regardless of backend data."
+    - **IF (Config Status is 'Visible')**:
+        - **IF (\`rating\` > 0 in Section 0)** → **Expected State: VISIBLE**. (Fail if absent).
+        - **IF (\`rating\`: null or 0 in Section 0)**:
+            - **IF (\`feed_type\`: "social_feed")** → **Expected State: ABSENT**.
+            - **VERDICT: PASS**. 
+            - **REMARK**: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 (Proof: SECTION 0 - ID:REAL_ID_HERE)"
+            - **IF (\`feed_type\`: "text_feed")** → **Expected State: ABSENT**.
+            - **VERDICT: PASS**.
     - **IF (\`platform\`: "Unknown" or missing in Section 0)**:
         - **IF (Social Icon is NOT present in UI)**:
             - **VERDICT: Not Applicable**.
-            - **REMARK**: "[Card: INSERT_NAME] Social platform icon is not present as the data (slug) is missing or manual source (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
+            - **REMARK**: "[Card: INSERT_NAME] Social platform icon is not present as the data (slug) is missing or manual source (Proof: SECTION 0 - ID:REAL_ID_HERE)".
             - **MANDATORY**: For the 'Show Social Platform Icon' result, use status "Not Applicable" if this condition is met for all cards in the screenshot.
     - **RULE 20.C (COMPACT WIDGET EXCEPTION - MARQUEE/TOAST/AVATAR)**:
         - For **MARQUEE_STRIPE**, **FLOATING_TOAST**, **AVATAR_BLOCK**, **AVATAR_GROUP**, and **AVATAR_CAROUSEL** widgets: 
@@ -629,7 +632,22 @@ Q11. **AGGREGATE STAR RATING**: Look at the base widget (the row of avatars in p
 **RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
 - **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
 - **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
+<<<<<<< HEAD
 - Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.`,
+=======
+- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
+- **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
+- **RULE 26: MANUAL REVIEW EXCEPTION**: Manual text reviews (where Section 0 data shows 'slug': 'manual' or 'platform': 'Unknown') do NOT have social platform icons. 
+- **PASS_BY_INTENT**: If a review has no platform icon, and Section 0 indicates it is a 'manual' entry (icon URL is null or platform is Unknown), you MUST report **PASS** for 'Show Social Platform Icon'.
+- **RULE 27: CONFIG DOMINANCE (PASSIVE FEATURES)**: If the configuration for a feature is "Absent", and you report UI Status: "Absent", the final result MUST be **PASS**. 
+- **NO HALLUCINATED FAILURES**: You are FORBIDDEN from reporting a FAIL for a feature that is correctly Absent per config (e.g., Show Review Ratings: FAIL (UI: Absent, Config: Absent) is a LOGICAL ERROR). If Config is Absent, UI Absent = PASS.
+**RULE 22: THE OVERFLOW & RESILIENCY AUDIT**
+- **VERTICAL SYMMETRY**: Compare the whitespace at the TOP of the card to the whitespace at the BOTTOM.
+- **NON-RESILIENT FAIL**: If the top padding is large (e.g. 30px) but the bottom padding is < 4px (causing content to hit the edge), the layout is **SHATTERED**.
+- **TRIGGER**: FAIL Category A using token **FAIL_LAYOUT_SHATTERED**.
+- **AVATAR ALIGNMENT**: For Avatar Group, the Avatar circle must NOT overlap the vertical space of the Review Body. If it sits too close to the text baseline, trigger **FAIL_CONTAINMENT_COLLISION**.
+- Apply RULE 1 (Sharpness) to avatars`,
+>>>>>>> review-ratings
 
       AVATAR_BLOCK: `
 **AVATAR_BLOCK — WIDGET-SPECIFIC CHECKS:**
@@ -675,7 +693,15 @@ Q5. **DATE FORMAT**: Inside popup—strict "Month D, YYYY" or "Month DD, YYYY" (
 **SINGLE_SLIDER / AVATAR_SLIDER — WIDGET-SPECIFIC CHECKS:**
 Q1. **VIEWPORT CAPTURE EXCEPTION**: Because this is a high-resolution focused viewport capture, cards at the image boundaries (TOP, BOTTOM, LEFT, RIGHT) will naturally be cut off. This is **expected and a PASS**. Are elements in the **CENTER** of the image complete? → [CENTER COMPLETE (PASS) / CENTER TRUNCATED]
 Q2. **FLAT-WALL MANDATE**: Review cards in this widget often use borderless designs. If the text is fully readable, a "Flat Wall" appearance at the card bottom is a **PASS**.
+<<<<<<< HEAD
 Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)? → [VISIBLE / MISSING]
+=======
+Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)?
+    - If NO logo exists and the card is a **Manual Review** → [MANUAL_REVIEW_PASS]
+    - If NO logo exists and it's an **Imported Review** → [MISSING]
+    - If logo exists → [VISIBLE]
+    → [VISIBLE / MANUAL_REVIEW_PASS / MISSING]
+>>>>>>> review-ratings
 Q4. **READ MORE AUDIT**: Look for literal text "Read More" immediately following an ellipsis (...).
     - If you see (...) followed by "Read More" → [VISIBLE]
     - If you see (...) but NO "Read More" → [ABSENT_TRUNCATED_FAIL]
@@ -691,6 +717,21 @@ Q5. **STAR RATING AUDIT**: Look at the TOP of the widget (above the review text)
 - Q4 ABSENT_TRUNCATED_FAIL → FAIL feature
 - Q5 MISSING (if config says "Visible") → FAIL feature
 - Apply RULE 1 (Sharpness) to all visible images`,
+
+      COMPANY_LOGO_SLIDER: `
+**COMPANY_LOGO_SLIDER — WIDGET-SPECIFIC CHECKS:**
+Q1. **GRAY MODE AUDIT**: Are the logos strictly grayscale (shades of gray/black/white ONLY)? 
+    - If you see ANY color (blue, green, orange, red) in a logo → [COLOR_MODE]
+    - If all logos are strictly gray/black/white → [GRAY_MODE]
+    → [COLOR_MODE / GRAY_MODE]
+Q2. **SLICING AUDIT**: Are any logos cut off at the TOP or BOTTOM of the strip? → [FULLY VISIBLE / SLICED]
+Q3. **MOVEMENT**: Is the strip a marquee/scroller? → [MARQUEE / STATIC]
+
+**FAILURE TRIGGERS:**
+- **GRAY MODE HALLUCINATION**: You are FORBIDDEN from reporting "Gray mode" if you see even a hint of color in a logo. 
+- Q1 GRAY_MODE (if config says "Absent") → FAIL feature
+- Q1 COLOR_MODE (if config says "Visible") → FAIL feature
+- Q2 SLICED → FAIL Category A`,
 
       MARQUEE_UPDOWN: `
 **MARQUEE_UPDOWN — WIDGET-SPECIFIC CHECKS:**

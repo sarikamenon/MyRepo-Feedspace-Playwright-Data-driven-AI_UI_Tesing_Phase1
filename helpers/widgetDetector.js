@@ -301,10 +301,7 @@ class WidgetDetector {
         };
 
         const classes = info.allClasses;
-        const SIGNATURES_ORDERED = [
-            ...CSS_SIGNATURES.filter(s => s.type === 'MASONRY'),
-            ...CSS_SIGNATURES.filter(s => s.type !== 'MASONRY')
-        ];
+        const SIGNATURES_ORDERED = CSS_SIGNATURES; // Use the specific ordering defined in CSS_SIGNATURES
 
         for (const signature of SIGNATURES_ORDERED) {
             for (const cls of signature.classes) {
@@ -314,18 +311,19 @@ class WidgetDetector {
 
         // ── STEP 3: HTML Snippet Fallback ────────────────────────────────
         // If attributes and CSS classes fail, check the raw HTML for keywords.
+        // We use more specific tokens to avoid generic text matching.
         const snippet = info.htmlSnippet;
-        if (snippet.includes('masonry')) return 'MASONRY';
+        if (snippet.includes('fe-masonry') || snippet.includes('masonry-widget')) return 'MASONRY';
         if (snippet.includes('cross-slider')) return 'CROSS_SLIDER';
         if (snippet.includes('company-logo-slider')) return 'COMPANY_LOGO_SLIDER';
         if (snippet.includes('avatar-carousel')) return 'AVATAR_CAROUSEL';
-        if (snippet.includes('floating-toast') || snippet.includes('chat-bubble')) return 'FLOATING_TOAST';
+        if (snippet.includes('fe-toast-card') || snippet.includes('fe-chat-bubble')) return 'FLOATING_TOAST';
         if (snippet.includes('avatar-group')) return 'AVATAR_GROUP';
         if (snippet.includes('strip-slider')) return 'MARQUEE_STRIPE';
         if (snippet.includes('single-slider')) return 'SINGLE_SLIDER';
         if (snippet.includes('marquee-updown')) return 'MARQUEE_UPDOWN';
         if (snippet.includes('marquee-leftright')) return 'MARQUEE_LEFTRIGHT';
-        if (snippet.includes('carousel')) return 'CAROUSEL_SLIDER';
+        if (snippet.includes('carousel-widget') || snippet.includes('testimonial-slider')) return 'CAROUSEL_SLIDER';
 
         return 'Unknown';
     }
