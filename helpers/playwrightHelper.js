@@ -617,8 +617,8 @@ class PlaywrightHelper {
                 if (configHint !== 'Unknown') {
                     console.log(`[PlaywrightHelper] 💡 Config Hint Detection: Using ${configHint} based on unique property keys.`);
                     this.widgetType = configHint;
-                } else if (locator && this.expectedType !== 'Unknown' && (detectedType === 'CAROUSEL_SLIDER' || detectedType === 'Unknown')) {
-                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection is generic/failed, 
+                } else if (locator && this.expectedType !== 'Unknown' && detectedType !== this.expectedType) {
+                    // TRUTH OVERRIDE: If the user provided a type in config, and DOM detection returned something else, 
                     // trust the config ONLY if a locator was found and it has Feedspace signatures.
                     const isRealFeedspace = await locator.evaluate(el => {
                         const classes = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
