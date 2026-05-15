@@ -632,9 +632,7 @@ Q11. **AGGREGATE STAR RATING**: Look at the base widget (the row of avatars in p
 **RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
 - **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
 - **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
-<<<<<<< HEAD
-- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.`,
-=======
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.
 - **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
 - **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
 - **RULE 26: MANUAL REVIEW EXCEPTION**: Manual text reviews (where Section 0 data shows 'slug': 'manual' or 'platform': 'Unknown') do NOT have social platform icons. 
@@ -647,7 +645,7 @@ Q11. **AGGREGATE STAR RATING**: Look at the base widget (the row of avatars in p
 - **TRIGGER**: FAIL Category A using token **FAIL_LAYOUT_SHATTERED**.
 - **AVATAR ALIGNMENT**: For Avatar Group, the Avatar circle must NOT overlap the vertical space of the Review Body. If it sits too close to the text baseline, trigger **FAIL_CONTAINMENT_COLLISION**.
 - Apply RULE 1 (Sharpness) to avatars`,
->>>>>>> review-ratings
+
 
       AVATAR_BLOCK: `
 **AVATAR_BLOCK — WIDGET-SPECIFIC CHECKS:**
@@ -693,15 +691,12 @@ Q5. **DATE FORMAT**: Inside popup—strict "Month D, YYYY" or "Month DD, YYYY" (
 **SINGLE_SLIDER / AVATAR_SLIDER — WIDGET-SPECIFIC CHECKS:**
 Q1. **VIEWPORT CAPTURE EXCEPTION**: Because this is a high-resolution focused viewport capture, cards at the image boundaries (TOP, BOTTOM, LEFT, RIGHT) will naturally be cut off. This is **expected and a PASS**. Are elements in the **CENTER** of the image complete? → [CENTER COMPLETE (PASS) / CENTER TRUNCATED]
 Q2. **FLAT-WALL MANDATE**: Review cards in this widget often use borderless designs. If the text is fully readable, a "Flat Wall" appearance at the card bottom is a **PASS**.
-<<<<<<< HEAD
-Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)? → [VISIBLE / MISSING]
-=======
 Q3. **EAGLE EYE (SOCIAL ICON)**: Look specifically NEXT TO THE REVIEWER NAME. Is there a platform logo (Google 'G', Trustpilot star)?
     - If NO logo exists and the card is a **Manual Review** → [MANUAL_REVIEW_PASS]
     - If NO logo exists and it's an **Imported Review** → [MISSING]
     - If logo exists → [VISIBLE]
     → [VISIBLE / MANUAL_REVIEW_PASS / MISSING]
->>>>>>> review-ratings
+
 Q4. **READ MORE AUDIT**: Look for literal text "Read More" immediately following an ellipsis (...).
     - If you see (...) followed by "Read More" → [VISIBLE]
     - If you see (...) but NO "Read More" → [ABSENT_TRUNCATED_FAIL]
