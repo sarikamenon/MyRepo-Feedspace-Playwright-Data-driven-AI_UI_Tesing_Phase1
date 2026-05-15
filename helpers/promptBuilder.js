@@ -217,6 +217,8 @@ ${isMultiImage ? `
 🚨 RULE 17: STORYBOARD AUDIT (EXHAUSTIVE MANDATE) 🚨
 ============================================================
 - **MANDATORY PANNED REVIEW**: You are FORBIDDEN from reporting a "Wholesale Pass". You MUST zoom and pan across EVERY screenshot (Part 1 to Part 14).
+- **ANY-CARD PRIORITY MANDATE (IRON LOCK)**: If you see a feature (Stars, Social Icon, Read More, Date) on **ANY** single card in **ANY** screenshot, you MUST report that feature as **Visible**.
+- **DATA-DRIVEN FALLBACK**: You are ONLY permitted to apply "Data-Driven Pass" logic (e.g., Rule 12.A, 13.A) if **NONE** of the cards in the entire storyboard show the feature physically in their pixels.
 - **UNIVERSAL AUDIT**: If even ONE card in ONE image shows a defect (Blur, Clipping, Truncation), the entire Category MUST be marked as **FAIL**.
 - **THE WEAKEST LINK**: A single blurry card (any pixelated or low-quality artifact) kills the PASS for the entire widget.
 - **INITIAL vs EXPANDED**: Audit both the preview badges and the expanded cards. Popups are frequently softer than previews.
@@ -242,9 +244,9 @@ ${isMultiImage ? `
             - **VERDICT: PASS**.
     - **IF (\`platform\`: "Unknown" or missing in Section 0)**:
         - **IF (Social Icon is NOT present in UI)**:
-            - **VERDICT: Not Applicable**.
+            - **VERDICT: PASS**.
             - **REMARK**: "[Card: INSERT_NAME] Social platform icon is not present as the data (slug) is missing or manual source (Proof: SECTION 0 - ID:REAL_ID_HERE)".
-            - **MANDATORY**: For the 'Show Social Platform Icon' result, use status "Not Applicable" if this condition is met for all cards in the screenshot.
+            - **MANDATORY**: For the 'Show Social Platform Icon' result, use status "PASS" if this condition is met for all cards in the screenshot.
     - **RULE 20.C (COMPACT WIDGET EXCEPTION - MARQUEE/TOAST/AVATAR)**:
         - For **MARQUEE_STRIPE**, **FLOATING_TOAST**, **AVATAR_BLOCK**, **AVATAR_GROUP**, and **AVATAR_CAROUSEL** widgets: 
         - If the social icon is visible in the **EXPANDED POPUP/MODAL**, you MUST report **PASS** for 'Show Social Platform Icon' even if it is absent in the scrolling stripe/preview card.
@@ -256,7 +258,7 @@ ${isMultiImage ? `
     - You MUST identify the card you are auditing by Name (e.g., "[Card: Hayden Arnold]").
     - If a rating/icon is absent because Section 0 data is null/0, you MUST provide a remark following this pattern: "[Card: INSERT_NAME] Review ratings are not present as the rating in the data is null or 0 (Proof: SECTION 0 - ID:REAL_ID_HERE, Platform:REAL_PLATFORM_HERE)".
 4. **SHARPNESS BENCHMARK**: Look at anti-aliasing. If text is sharp, diagonal text or icons may have minor smoothing. This is **PASS**.
-5. **STATUS LOCK (ABSOLUTE)**: If you use the remark "Review ratings are not present as the rating in the data is null or 0" or "Social platform icon is not present as the data is null", you MUST mark the status as **PASS**. If the platform slug is missing entirely for all visible reviews, you MUST mark the status as **Not Applicable**.
+5. **STATUS LOCK (ABSOLUTE)**: If you use the remark "Review ratings are not present as the rating in the data is null or 0" or "Social platform icon is not present as the data is null", you MUST mark the status as **PASS**. If the platform slug is missing entirely for all visible reviews, you MUST mark the status as **PASS**.
 6. **PROOF-ID MANDATE (CRITICAL)**: You are FORBIDDEN from outputting literal "XXXX", "YYYY", or "N/A" if a matching record exists in SECTION 0. You MUST find the actual \`id\` and \`platform\`.
    - **Identity Mapping Log**: Your reasoning MUST begin with a map: "Pixel [AN] -> ID:33769".
    - **System Failure**: Using placeholders will result in an immediate rejection.
@@ -331,8 +333,9 @@ ${isMultiImage ? `
     - If 'show_full_review' is **"1"**: You MUST NOT see "Read more". If it is visible, it is a **FAIL (Config Violation)**.
 - **SIGNATURE**: Literal text "Read More", "Read more", or "read more" (can be Blue, Grey, or any color).
 - **RTL SUPPORT**: In widgets with Arabic/Hebrew text, the link may appear on the left or right; scan the entire line.
-- **PASS CRITERIA**: Report "Visible" if ANY variation of "Read More/Less" is transcribed, regardless of color or casing.
+- **PASS CRITERIA (ANY CARD PRINCIPLE)**: If "Read More" or "Read Less" is visible on **ANY** card in the widget (across ANY screenshot), you MUST report UI Status: **Visible** and Verdict: **PASS**.
 - **MANDATORY**: Quote the text and color (e.g., "Read More" or "Read Less") to verify visibility in the expanded state.
+- **SHORT TEXT EXCEPTION (ALL-OR-NOTHING)**: You may ONLY report UI Status: **Absent** and Verdict: **PASS (Data-Driven)** if **EVERY** visible review in the screenshots is short (under 10 lines) and naturally does not require truncation. If even one card needs it and doesn't have it, FAIL.
 - **TRIGGERS**: Category C (Content & Text Rendering). (You are PROHIBITED from using Rule 5 as evidence for Category A).
 
 
@@ -478,10 +481,11 @@ ${isMultiImage ? `
     - **RULE 11.C (FORCE PASS)**: If applying RULE 11.A, you MUST include the keyword **SKELETON_PASS_FORCE** in your reasoning to prevent manual overrides.
 
 **RULE 12: RATING VISIBILITY (HYBRID & MULTI-COLOR)**
-- **PASS CRITERIA**: If ratings are visible on **ANY** card, report UI Status: **Visible** and Verdict: **PASS**.
-- **DATA-DRIVEN PASS (RULE 12.A)**: If Config Status is **Visible** but the UI is **Absent**:
+- **PASS CRITERIA**: If ratings are visible on **ANY** card in **ANY** screenshot, you MUST report UI Status: **Visible** and Verdict: **PASS**.
+- **VISIBILITY PRIORITY (IRON LOCK)**: If you see stars on even ONE card, you are PROHIBITED from reporting UI Status as "Absent". You must report "Visible".
+- **DATA-DRIVEN PASS (RULE 12.A)**: If Config Status is **Visible** but the UI is **Absent** on **EVERY** visible card:
     - Perform a **Section 0 Audit**.
-    - If the specific review has \`rating: null\` or \`rating: 0\`, you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
+    - If the reviews have \`rating: null\` or \`rating: 0\`, you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
     - **RASTER TRUTH**: Do NOT report UI Status as 'Visible' if you cannot see stars. UI Status reflects the **PIXELS**, Verdict reflects the **LOGIC**.
     - **REMARK**: "[Card: Name] Review ratings are correctly absent as the data is null/0 (Proof: ID:123, Rating:null)".
 - **VIOLATION (RULE 12.B)**: If UI is **Visible** but Config specifies **Absent**, you MUST mark the verdict as **FAIL** (This is a product regression).
@@ -493,9 +497,10 @@ ${isMultiImage ? `
 - **COLOR**: Any color (Yellow, Green, Purple, Blue, etc.) is valid.
 - **DOM_TRUTH**: If SECTION -1 shows a detection (e.g., "STARS + NUMERICAL"), you MUST report Visible.
 
-**RULE 13.A: DATA-DRIVEN PASS (RULE 13.A)**: If Config Status is **Visible** but the UI is **Absent**:
+**RULE 13.A: DATA-DRIVEN PASS (RULE 13.A)**: If Config Status is **Visible** but the UI is **Absent** on **EVERY** visible card:
     - Perform a **Section 0 Audit** for the \`slug\`.
-    - If the specific review has \`slug: null\`, \`N/A\`, \`NA\`, \`manual\`, or is empty, you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
+    - If the reviews have \`slug: null\`, \`N/A\`, \`NA\`, \`manual\`, or are empty, you MUST mark **UI Status: Absent**, **Config Status: Visible**, and **Verdict: PASS**.
+    - **VISIBILITY PRIORITY (IRON LOCK)**: If you see a platform icon on even ONE card, you MUST report UI Status as **Visible**.
     - **RASTER TRUTH**: Do NOT report UI Status as 'Visible' if you cannot see logos. UI Status reflects the **PIXELS**, Verdict reflects the **LOGIC**.
     - **REMARK**: "[Card: Name] Social platform icon is correctly absent as the data slug is missing/manual (Proof: ID:123, Slug:N/A)".
 - **VIOLATION (RULE 13.B)**: If UI is **Visible** but Config is **Absent**, you MUST mark the verdict as **FAIL** (This is a product regression).
@@ -859,11 +864,11 @@ Q2. **NAME/ROLE TRUNCATION (RULE 3 - IRON LOCK)**:
 Q3. **READ MORE AUDIT**: Apply RULE 5—literal words "Read More" or "Read Less" present?
     - **ANY CARD PRINCIPLE**: It is **NOT mandatory** for all cards to have "Read More". It only appears on long reviews.
     - **READ LESS EQUIVALENCE**: If you see "Read Less" on any card, you MUST report the "Read More" feature as **Visible** and **PASS**. They are the exact same feature.
-    - **SHORT TEXT EXCEPTION**: If ALL visible reviews in the screenshots are visibly short (under 10 lines) and naturally do not require truncation, you MUST report UI Status: **Not Applicable** and Verdict: **PASS**.
+    - **SHORT TEXT EXCEPTION**: If ALL visible reviews in the screenshots are visibly short (under 10 lines) and naturally do not require truncation, you MUST report UI Status: **Absent** and Verdict: **PASS**.
     - **GLOBAL SCAN MANDATE**: If you do not see "Read More" or "Read Less" on the first card you look at, you MUST scan EVERY OTHER SCREENSHOT.
     - **PASS CRITERIA**: If "Read More" or "Read Less" is visible on **ANY** card in the widget (in any screenshot), report UI Status: **Visible** and Verdict: **PASS**.
     - **ELLIPSIS**: "..." alone on some cards is acceptable if "Read More" text is present elsewhere.
-    - Quote its text and color: → ["[Color] Read More" / "[Color] Read Less" / "ABSENT" / "Not Applicable (Short Text)"]
+    - Quote its text and color: → ["[Color] Read More" / "[Color] Read Less" / "ABSENT" / "PASS (Short Text)"]
 Q4. **DATE AUDIT**: Grey date text visible? Apply RULE 14.
 Q5. **RATING AUDIT**: Look directly ABOVE or BELOW the reviewer's name/title on the cards (or inside expanded popups). Are rating indicators visibly rendered? (This can be stars of any color, numeric scores like '5/5', or filled circles). **GLOBAL SCAN MANDATE**: You MUST scan ALL screenshots before marking this feature as Absent. → ["[Rating Type] Visible" / "ABSENT"]
 
@@ -1089,7 +1094,7 @@ REPORTING LOGIC & JSON OUTPUT
 - (UI: Visible) + (Config: Visible) => PASS
 - (UI: Visible) + (Config: Absent) => FAIL (Unintended Feature)
 - (UI: Absent) + (Config: Visible) => FAIL
-- (UI: Absent) + (Config: Absent) => Not Applicable
+- (UI: Absent) + (Config: Absent) => PASS
 
 **MISSING CONFIG RULE:**
 If a config key is MISSING/UNDEFINED → assume expected state is "Absent"

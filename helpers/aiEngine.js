@@ -302,7 +302,7 @@ class AIEngine {
                                 continue;
                             }
                             const beforeKeyword = lowAnswer.split(key.toLowerCase())[0];
-                            if (!negations.some(neg => beforeKeyword.includes(neg))) {
+                            if (!negations.some(neg => trimmedLine.includes(neg))) {
                                 return line;
                             }
                         }
