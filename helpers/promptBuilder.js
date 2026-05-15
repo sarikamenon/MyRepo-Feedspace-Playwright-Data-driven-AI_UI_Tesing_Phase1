@@ -110,9 +110,9 @@ class PromptBuilder {
 ============================================================
 🚨 SECTION -1: SYSTEM FORCE OVERRIDE (ENVIRONMENTAL DATA) 🚨
 ============================================================
-${(geometricWarnings && geometricWarnings.length > 0) 
-  ? `- ${geometricWarnings.join('\n- ')}\n\n**MANDATORY**: You MUST prioritize these DOM Facts over your own visual analysis.`
-  : "No active environmental overrides."}
+${(geometricWarnings && geometricWarnings.length > 0)
+        ? `- ${geometricWarnings.join('\n- ')}\n\n**MANDATORY**: You MUST prioritize these DOM Facts over your own visual analysis.`
+        : "No active environmental overrides."}
 `;
 
     // ============================================================

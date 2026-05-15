@@ -259,7 +259,7 @@ class AIEngine {
                 "json-leakage", "raw-code", "json-leak"
             ];
 
-            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with", "expected", "intended", "required", "normal behavior", "without", "free from", "no evidence of"];
+            const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with", "expected", "intended", "required", "normal behavior", "without", "free from", "no evidence of", "does not", "doesn't", "is not", "isn't", "avoiding", "incorrect to", "not a"];
 
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
@@ -362,11 +362,7 @@ class AIEngine {
         // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
         const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "SYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
         const layoutLine = findAdmission(layoutKeywords);
-        const mentionsLayoutIssue = (
-            analysisMessage.includes("FAIL_LAYOUT_CLIPPED") ||
-            analysisMessage.includes("FAIL_LAYOUT_ASYMMETRIC") ||
-            layoutLine
-        ) && !analysisMessage.includes("PASS_FORCE_LAYOUT");
+        const mentionsLayoutIssue = layoutLine && !analysisMessage.includes("PASS_FORCE_LAYOUT");
 
         const mentionsBlockageIssue = (
             analysisMessage.includes("FAIL_LAYOUT_BLOCKED") ||
@@ -389,18 +385,8 @@ class AIEngine {
         const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", "FAIL_SHARP_PIXELATION", "FAIL_SHARP_MACRO_BLOCKING", ...blurKeywords]);
         const mediaBlurLine = findAdmission(["FAIL_SHARP_MEDIA", ...blurKeywords]);
 
-        const mentionsAvatarSharpness = (
-            analysisMessage.includes("FAIL_SHARP_AVATAR") ||
-            analysisMessage.includes("FAIL_SHARP_PIXELATION") ||
-            analysisMessage.includes("FAIL_SHARP_MACRO_BLOCKING") ||
-            analysisMessage.includes("CRITICAL_AVATAR_FAILURE") ||
-            avatarBlurLine
-        ) && !analysisMessage.includes("PASS_FORCE_SHARP");
-
-        const mentionsMediaSharpness = (
-            analysisMessage.includes("FAIL_SHARP_MEDIA") ||
-            mediaBlurLine
-        ) && !analysisMessage.includes("PASS_FORCE_SHARP");
+        const mentionsAvatarSharpness = avatarBlurLine && !analysisMessage.includes("PASS_FORCE_SHARP");
+        const mentionsMediaSharpness = mediaBlurLine && !analysisMessage.includes("PASS_FORCE_SHARP");
 
         // ── CONTENT & CONTAINMENT ──
         const contentLine = findAdmission(["FAIL_CONTENT_TRUNCATED", "FAIL_CONTENT_JSON_LEAK"]);
@@ -420,21 +406,13 @@ class AIEngine {
 
         // ── DATE: Strict tokens only ──
         const dateLine = findAdmission(["FAIL_DATE_FORMAT", "FAIL_DATE_RULE14"]);
-        const mentionsDateIssue = (
-            analysisMessage.includes("FAIL_DATE_FORMAT") ||
-            analysisMessage.includes("FAIL_DATE_RULE14") ||
-            dateLine
-        );
+        const mentionsDateIssue = dateLine;
 
         const dateProof = extractProof(dateLine);
 
         // ── ICON: anchor strings + findAdmission fallback ──
-        const iconLine = findAdmission(["icon violation", "erroneous visibility", "visible despite config", "logo-fail"]);
-        const mentionsIconIssue = (
-            analysisMessage.includes("ICON VIOLATION") ||
-            analysisMessage.includes("VISIBLE DESPITE CONFIG") ||
-            iconLine
-        );
+        const iconLine = findAdmission(["ICON VIOLATION", "VISIBLE DESPITE CONFIG", "icon violation", "erroneous visibility", "visible despite config", "logo-fail"]);
+        const mentionsIconIssue = iconLine;
 
         const iconProof = extractProof(iconLine);
 
