@@ -111,8 +111,8 @@ async function run() {
     console.log(`[Main] Found ${testData.length} records in local testUrls.json.`);
 
     const browser = await chromium.launch({
-        headless: !!process.env.CI,
-        channel: 'chrome', // Use branded Chrome for higher trust score
+        headless: process.env.HEADLESS === 'false' ? false : true, // Default to headless for consistency
+        channel: 'chrome', 
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -121,15 +121,15 @@ async function run() {
             '--window-position=0,0',
             '--ignore-certificate-errors',
             '--ignore-certificate-errors-spki-list',
-            '--disable-web-security',
-            '--use-fake-ui-for-media-stream',
-            '--use-fake-device-for-media-stream'
+            '--disable-web-security'
         ],
         ignoreDefaultArgs: ['--enable-automation']
-    }); // Headless in CI, visible locally
+    });
 
     const reportHelper = new ReportHelper();
     const results = [];
+    const targetWidth = this.targetWidth || 1920;
+    const targetHeight = this.targetHeight || 1080;
 
     for (let i = 0; i < testData.length; i++) {
         const entry = testData[i];
@@ -148,9 +148,8 @@ async function run() {
         while (urlAttempt < maxUrlAttempts && !success) {
             urlAttempt++;
 
-            // Create a fresh context for each attempt to avoid state contamination or session crashes
             const context = await browser.newContext({
-                viewport: { width: this.targetWidth || 1920, height: this.targetHeight || 1080 },
+                viewport: { width: targetWidth, height: targetHeight },
                 deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
                 locale: 'en-US',

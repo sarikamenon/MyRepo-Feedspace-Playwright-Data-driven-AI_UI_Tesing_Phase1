@@ -162,8 +162,8 @@ async function run() {
     console.log(`[OnDemand] ${newUrls.length} NEW URL(s) to process after filtering.`);
 
     const browser = await chromium.launch({
-        headless: true, // Always headless on-demand (GitHub Actions)
-        channel: 'chrome', // Use branded Chrome for higher trust score
+        headless: process.env.HEADLESS === 'false' ? false : true, // Default to headless for consistency
+        channel: 'chrome', 
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -172,9 +172,7 @@ async function run() {
             '--window-position=0,0',
             '--ignore-certificate-errors',
             '--ignore-certificate-errors-spki-list',
-            '--disable-web-security',
-            '--use-fake-ui-for-media-stream',
-            '--use-fake-device-for-media-stream'
+            '--disable-web-security'
         ],
         ignoreDefaultArgs: ['--enable-automation']
     });
@@ -252,6 +250,11 @@ async function run() {
 
                 results.push(record);
                 saveProcessedUrl(url);
+
+                // Incremental Progress Report (Added for parity with runValidation.js)
+                const partialReportPath = path.join(process.cwd(), 'reports', 'current_progress.json');
+                fs.writeFileSync(partialReportPath, JSON.stringify({ runs: results }, null, 2));
+
                 success = true;
                 console.log(`   > Status: ${record.status}`);
 

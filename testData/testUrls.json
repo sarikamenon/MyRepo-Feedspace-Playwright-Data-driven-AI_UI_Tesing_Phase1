@@ -1,15 +1,7 @@
 {
     "data": [
         {
-            "url": "https://d4730d91-2ae0-4377-b120-8d66028496c6.filesusr.com/html/018aef_c35c92e67243693416fe9eb4a17607b5.html",
-            "type": "single_slider",
-            "configurations": {
-                "custom_css": null,
-                "is_autoplay": "1"
-            }
-        },
-        {
-            "url": "https://www.reseauphilippeauer.com/preparation-appel-e2c4b517",
+            "url": "https://5d95e605-8772-4c6c-8fd8-e5ea0da641b2.filesusr.com/html/018aef_e2d92a187ea744defe84a8d6d4734c14.html",
             "type": "carousel_slider",
             "configurations": {
                 "custom_css": null,
@@ -17,4 +9,4 @@
             }
         }
     ]
-}
+}
