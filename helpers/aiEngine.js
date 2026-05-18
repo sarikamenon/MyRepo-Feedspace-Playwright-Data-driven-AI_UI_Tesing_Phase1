@@ -290,7 +290,11 @@ class AIEngine {
                         // Strict tokens must be present and NOT preceded by a negation
                         if (answerPart.includes(key)) {
                             const beforeToken = answerPart.split(key)[0].toLowerCase();
-                            if (!negations.some(neg => beforeToken.includes(neg))) {
+                            const hasNegation = negations.some(neg => {
+                                if (neg === "✓") return beforeToken.includes(neg);
+                                return new RegExp(`\\b${neg}\\b`, 'i').test(beforeToken);
+                            });
+                            if (!hasNegation) {
                                 return line;
                             }
                         }
@@ -301,8 +305,14 @@ class AIEngine {
                             if (line.trim().startsWith("* Q") || line.trim().startsWith("Q") || line.toLowerCase().endsWith("? no") || line.toLowerCase().endsWith("no.")) {
                                 continue;
                             }
-                            const beforeKeyword = lowAnswer.split(key.toLowerCase())[0];
-                            if (!negations.some(neg => trimmedLine.includes(neg))) {
+                            const lowTrimmed = trimmedLine.toLowerCase();
+                            // Use regex with word boundaries for safe words, or simple includes for symbols
+                            const hasNegation = negations.some(neg => {
+                                if (neg === "✓") return lowTrimmed.includes(neg);
+                                return new RegExp(`\\b${neg}\\b`, 'i').test(lowTrimmed);
+                            });
+                            
+                            if (!hasNegation) {
                                 return line;
                             }
                         }
@@ -313,7 +323,11 @@ class AIEngine {
                 for (const blunt of bluntFailures) {
                     if (lowAnswer.includes(blunt.toLowerCase())) {
                         const beforeBlunt = lowAnswer.split(blunt.toLowerCase())[0];
-                        if (!negations.some(neg => beforeBlunt.includes(neg))) {
+                        const hasNegation = negations.some(neg => {
+                            if (neg === "✓") return beforeBlunt.includes(neg);
+                            return new RegExp(`\\b${neg}\\b`, 'i').test(beforeBlunt);
+                        });
+                        if (!hasNegation) {
                             return line;
                         }
                     }
