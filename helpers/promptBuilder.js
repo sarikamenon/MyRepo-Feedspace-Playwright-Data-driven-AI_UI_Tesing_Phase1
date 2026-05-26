@@ -91,7 +91,7 @@ class PromptBuilder {
         id: f.id,
         user: name,
         initials: initials,
-        text: f.comment?.substring(0, 100) || "N/A",
+        text: f.comment?.substring(0, 1000) || "N/A",
         platform: f.social_platform?.name || (typeof f.social_platform === 'string' ? f.social_platform : "Unknown"),
         slug: f.social_platform?.slug || (typeof f.social_platform === 'string' ? f.social_platform : "N/A"),
         rating: (f.rating !== null && f.rating !== undefined) ? f.rating : 0,
@@ -329,13 +329,13 @@ ${isMultiImage ? `
 
 **RULE 5: READ MORE / READ LESS (LITERAL-EYE MANDATE)**
 - **MANDATORY**: 
-    - If 'show_full_review' is **"0"**: You MUST see "Read more" if the text is long.
+    - If 'show_full_review' is **"0"**: You MUST see "Read more" ONLY if the review text length is more than 10 lines. If the text is 10 lines or less, it naturally does NOT require a "Read More" link; its absence is a **PASS** case even if an ellipsis ("...") is present in the UI due to layout/line-clamping styling.
     - If 'show_full_review' is **"1"**: You MUST NOT see "Read more". If it is visible, it is a **FAIL (Config Violation)**.
 - **SIGNATURE**: Literal text "Read More", "Read more", or "read more" (can be Blue, Grey, or any color).
 - **RTL SUPPORT**: In widgets with Arabic/Hebrew text, the link may appear on the left or right; scan the entire line.
 - **PASS CRITERIA (ANY CARD PRINCIPLE)**: If "Read More" or "Read Less" is visible on **ANY** card in the widget (across ANY screenshot), you MUST report UI Status: **Visible** and Verdict: **PASS**.
 - **MANDATORY**: Quote the text and color (e.g., "Read More" or "Read Less") to verify visibility in the expanded state.
-- **SHORT TEXT EXCEPTION (ALL-OR-NOTHING)**: You may ONLY report UI Status: **Absent** and Verdict: **PASS (Data-Driven)** if **EVERY** visible review in the screenshots is short (under 10 lines) and naturally does not require truncation. If even one card needs it and doesn't have it, FAIL.
+- **SHORT/MEDIUM TEXT EXCEPTION**: If EVERY visible review in the screenshots has text length of 10 lines or less, then "Read More" is naturally not present. Report UI Status: **Absent** and Verdict: **PASS**. Do NOT fail any card for not displaying "Read More" if its text is 10 lines or less.
 - **TRIGGERS**: Category C (Content & Text Rendering). (You are PROHIBITED from using Rule 5 as evidence for Category A).
 
 

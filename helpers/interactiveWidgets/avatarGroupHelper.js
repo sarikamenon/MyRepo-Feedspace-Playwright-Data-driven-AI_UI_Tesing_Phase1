@@ -162,7 +162,11 @@ class AvatarGroupHelper {
                 });
             };
 
-            findInRoot(document.body);
+            const widgetEl = document.querySelector('[data-widget-type="AVATAR_GROUP"]') || 
+                             document.querySelector('.fe-feedspace-avatar-group-widget-wrap') || 
+                             document.querySelector('.feedspace-avatar-group') || 
+                             document.body;
+            findInRoot(widgetEl);
             return results;
         }, avatarSelectors);
 

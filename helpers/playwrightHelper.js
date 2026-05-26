@@ -311,21 +311,60 @@ class PlaywrightHelper {
     async _waitForFeedspaceScript() {
         console.log('[PlaywrightHelper] Waiting for Feedspace script to manifest (up to 45s)...');
 
+        // 1. Programmatically trigger interaction events to bypass lazy-loaders (e.g. WP Rocket)
+        await this.page.evaluate(() => {
+            try {
+                const triggerEvents = ['scroll', 'mousemove', 'mousedown', 'keydown', 'touchstart'];
+                triggerEvents.forEach(evtType => {
+                    window.dispatchEvent(new Event(evtType));
+                    document.dispatchEvent(new Event(evtType));
+                });
+            } catch (e) {}
+        }).catch(() => {});
+
+        // 2. Playwright-native interaction fallback
+        try {
+            await this.page.mouse.move(200, 200);
+            await this.page.mouse.wheel(0, 100);
+            await this.page.mouse.wheel(0, -100);
+        } catch (e) {}
+
         // --- SMART SCROLL FALLBACK ---
         // Trigger lazy-loaded scripts by scrolling the page early.
         await this._smartScroll();
 
+        // 3. Find any candidate container and scroll to it to trigger IntersectionObserver sentinel
+        try {
+            const candidates = this.page.locator(SELECTOR_STRING);
+            const count = await candidates.count();
+            console.log(`[PlaywrightHelper] Pre-scroll check: Found ${count} candidate containers for script triggering.`);
+            for (let i = 0; i < count; i++) {
+                const candidate = candidates.nth(i);
+                if (await candidate.isVisible().catch(() => false)) {
+                    console.log(`[PlaywrightHelper] Scrolling candidate ${i + 1}/${count} into view...`);
+                    await candidate.scrollIntoViewIfNeeded().catch(() => {});
+                    await this._sleep(1000); // Give it a moment to trigger Sentinel loading
+                }
+            }
+        } catch (e) {
+            console.warn(`[PlaywrightHelper] Pre-scrolling candidates failed: ${e.message}`);
+        }
+
         const startTime = Date.now();
         let found = false;
 
-        // 1. Wait for either a network response OR the script tag to appear in DOM
+        // 4. Wait for either a network response OR the script tag / initialized widget to appear in DOM
         while (Date.now() - startTime < 45000) {
             // Check network state
             const networkHit = this.detectedNetworkTypes.size > 0;
 
-            // Check DOM state
+            // Check DOM state - must be actual script or an initialized widget container (having shadowRoot or children)
             const scriptTag = await this.page.evaluate(() => {
-                return !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"], .feedspace-embed');
+                const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
+                const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
+                    return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
+                });
+                return hasScript || hasInitializedWidget;
             }).catch(() => false);
 
             if (networkHit || scriptTag) {
@@ -340,7 +379,7 @@ class PlaywrightHelper {
             console.warn('[PlaywrightHelper] ⚠️ No explicit Feedspace activity seen in 45s — proceeding with stabilization.');
         }
 
-        // 2. Mandatory stability sleep to allow the script to execute and render the widget
+        // 5. Mandatory stability sleep to allow the script to execute and render the widget
         console.log('[PlaywrightHelper] Stabilizing for 10s...');
         await this._sleep(10000);
     }
@@ -1215,7 +1254,7 @@ class PlaywrightHelper {
 
     async _handleLoadMoreLoop(context, screenshotBuffers = []) {
         const type = (this.widgetType || "").toUpperCase();
-        const isSlider = type.includes('SLIDER') || type.includes('CAROUSEL') || type.includes('MARQUEE') || type.includes('TOAST');
+        const isSlider = type.includes('SLIDER') || type.includes('CAROUSEL') || type.includes('MARQUEE') || type.includes('TOAST') || type.includes('AVATAR_GROUP') || type.includes('AVATAR_BLOCK');
 
         if (isSlider) {
             console.log(`[PlaywrightHelper] Skipping "Load More" loop for ${type} widget.`);
