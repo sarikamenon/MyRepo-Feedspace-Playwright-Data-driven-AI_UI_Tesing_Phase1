@@ -7,56 +7,12 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const PROCESSED_URLS_FILE = path.join(process.cwd(), 'testData', 'processed_urls_ondemand.json');
-
 /**
  * Normalizes a URL for consistent comparison.
  */
 function normalizeUrl(url) {
     if (!url || typeof url !== 'string') return '';
     return url.trim().toLowerCase().replace(/\/$/, '');
-}
-
-/**
- * Loads processed URLs from file.
- */
-function loadProcessedUrls() {
-    if (fs.existsSync(PROCESSED_URLS_FILE)) {
-        try {
-            const content = fs.readFileSync(PROCESSED_URLS_FILE, 'utf8').trim();
-            if (content) {
-                const data = JSON.parse(content);
-                return Array.isArray(data) ? data.map(normalizeUrl) : [];
-            }
-        } catch (e) {
-            console.error('[OnDemand] Failed to load processed_urls_ondemand.json, starting fresh.');
-            return [];
-        }
-    }
-    return [];
-}
-
-/**
- * Saves processed URLs to file.
- */
-function saveProcessedUrl(url) {
-    const normalized = normalizeUrl(url);
-    if (!normalized) return;
-
-    let processed = loadProcessedUrls();
-    // We store the original URL but check against normalized versions
-    let rawProcessed = [];
-    if (fs.existsSync(PROCESSED_URLS_FILE)) {
-        try {
-            const content = fs.readFileSync(PROCESSED_URLS_FILE, 'utf8').trim();
-            if (content) rawProcessed = JSON.parse(content);
-        } catch (e) { }
-    }
-
-    if (!processed.includes(normalized)) {
-        rawProcessed.push(url);
-        fs.writeFileSync(PROCESSED_URLS_FILE, JSON.stringify(rawProcessed, null, 2));
-    }
 }
 
 
@@ -147,19 +103,8 @@ async function run() {
     const targetHeight = dataRoot.height ? parseInt(dataRoot.height) : 1080;
     console.log(`[OnDemand] Target Viewport: ${targetWidth}x${targetHeight}`);
 
-    const processedUrls = loadProcessedUrls();
-    const newUrls = allApiData.filter(entry => {
-        const rawUrl = typeof entry === 'string' ? entry : (entry.customer_url || entry.url || '');
-        const normalized = normalizeUrl(rawUrl);
-        return normalized && !processedUrls.includes(normalized);
-    });
-
-    if (newUrls.length === 0) {
-        console.log('[OnDemand] All incoming URLs have already been processed. Skipping execution.');
-        process.exit(0);
-    }
-
-    console.log(`[OnDemand] ${newUrls.length} NEW URL(s) to process after filtering.`);
+    // Process all incoming URLs without filtering against previously run URLs
+    const newUrls = allApiData;
 
     const browser = await chromium.launch({
         headless: process.env.HEADLESS === 'false' ? false : true, // Default to headless for consistency
@@ -249,7 +194,6 @@ async function run() {
                 };
 
                 results.push(record);
-                saveProcessedUrl(url);
 
                 // Incremental Progress Report (Added for parity with runValidation.js)
                 const partialReportPath = path.join(process.cwd(), 'reports', 'current_progress.json');

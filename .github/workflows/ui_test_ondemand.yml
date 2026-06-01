@@ -37,14 +37,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
 
-      - name: Save processed URLs back to repo
-        run: |
-          git config user.email "bot@feedspace.io"
-          git config user.name "Feedspace Bot"
-          git add testData/processed_urls_ondemand.json
-          git diff --staged --quiet || git commit -m "chore: update on-demand processed URLs"
-          git pull --rebase origin main
-          git push
+
 
       - name: Upload Reports
         if: always()
