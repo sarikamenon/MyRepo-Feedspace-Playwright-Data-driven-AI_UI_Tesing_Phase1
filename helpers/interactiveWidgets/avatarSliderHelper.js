@@ -20,9 +20,10 @@ class AvatarSliderHelper {
         if (config) {
             const rawFeeds = config.widget_data?.feeds_data || config.feeds_data || config.data?.feeds_data || config.data || [];
             if (Array.isArray(rawFeeds) && rawFeeds.length > 0) {
-                // Find ALL reviews that have a rating > 1
                 const ratedFeeds = rawFeeds.filter(f => {
-                    const r = f.rating !== null && f.rating !== undefined ? f.rating : f.response;
+                    const r = (f.rating_type === 'star')
+                        ? ((f.response !== null && f.response !== undefined && f.response !== '') ? Number(f.response) : 0)
+                        : ((f.rating !== null && f.rating !== undefined) ? Number(f.rating) : 0);
                     return r && r > 1;
                 });
                 targetedFeedNames = ratedFeeds.map(f => f.app_user_name || f.user_name || f.name).filter(Boolean);

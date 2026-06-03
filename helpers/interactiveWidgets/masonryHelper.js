@@ -22,9 +22,10 @@ class MasonryHelper {
         let targetedFeedName = null;
         if (config) {
             const rawFeeds = config.widget_data?.feeds_data || config.feeds_data || config.data?.feeds_data || [];
-            // Find a review that explicitly has a >0 rating
             const ratedFeed = rawFeeds.find(f => {
-                const r = f.rating !== null && f.rating !== undefined ? f.rating : f.response;
+                const r = (f.rating_type === 'star')
+                    ? ((f.response !== null && f.response !== undefined && f.response !== '') ? Number(f.response) : 0)
+                    : ((f.rating !== null && f.rating !== undefined) ? Number(f.rating) : 0);
                 return r && r > 0;
             });
             if (ratedFeed) {

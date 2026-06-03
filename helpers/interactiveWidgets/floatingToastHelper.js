@@ -1,25 +1,25 @@
 class FloatingToastHelper {
     /**
-     * Helper to find an element even if it's inside a Shadow DOM.
+     * Helper to find an element even if it's inside a nested Shadow DOM.
      * @param {import('playwright').Page} page 
      * @param {string} selector 
      * @returns {Promise<import('playwright').ElementHandle | null>}
      */
     static async findDeep(page, selector) {
         return await page.evaluateHandle((sel) => {
-            function find(s) {
-                const el = document.querySelector(s);
+            function findRecursively(root, s) {
+                const el = root.querySelector(s);
                 if (el) return el;
-                const all = document.querySelectorAll('*');
-                for (const n of all) {
-                    if (n.shadowRoot) {
-                        const res = n.shadowRoot.querySelector(s);
-                        if (res) return res;
+                const children = Array.from(root.querySelectorAll('*'));
+                for (const child of children) {
+                    if (child.shadowRoot) {
+                        const found = findRecursively(child.shadowRoot, s);
+                        if (found) return found;
                     }
                 }
                 return null;
             }
-            return find(sel);
+            return findRecursively(document, sel);
         }, selector).then(h => h.asElement());
     }
 
@@ -49,24 +49,24 @@ class FloatingToastHelper {
             for (let i = 0; i < 20 && screenshotBuffers.length < (maxUniqueCaptures * 2); i++) {
                 // 🧹 CLEAN RESET: If modal is open, click its close button or click outside cleanly
                 await page.evaluate((selList, btnList) => {
-                    function findDeep(s) {
-                        const el = document.querySelector(s);
+                    function findRecursively(root, s) {
+                        const el = root.querySelector(s);
                         if (el) return el;
-                        const all = document.querySelectorAll('*');
-                        for (const n of all) {
-                            if (n.shadowRoot) {
-                                const res = n.shadowRoot.querySelector(s);
-                                if (res) return res;
+                        const children = Array.from(root.querySelectorAll('*'));
+                        for (const child of children) {
+                            if (child.shadowRoot) {
+                                const found = findRecursively(child.shadowRoot, s);
+                                if (found) return found;
                             }
                         }
                         return null;
                     }
-                    const modal = findDeep(selList.join(', '));
+                    const modal = findRecursively(document, selList.join(', '));
                     if (modal) {
                         const style = window.getComputedStyle(modal);
                         if (style.display !== 'none' && style.visibility !== 'hidden') {
                             for (const bSel of btnList) {
-                                const btn = modal.querySelector(bSel) || findDeep(bSel);
+                                const btn = modal.querySelector(bSel) || findRecursively(modal.shadowRoot || modal, bSel);
                                 if (btn) {
                                     btn.click();
                                     return;
@@ -82,16 +82,23 @@ class FloatingToastHelper {
 
                 // 1️⃣ Find the active foreground preview card (Sorted by z-index descending)
                 let previewCard = await page.evaluateHandle((selList) => {
-                    function getShadowRoot() {
-                        const all = document.querySelectorAll('*');
-                        for (const n of all) {
-                            if (n.shadowRoot) return n.shadowRoot;
+                    function findElementsRecursively(root, selector, results = []) {
+                        const elements = root.querySelectorAll(selector);
+                        elements.forEach(el => results.push(el));
+                        
+                        const children = Array.from(root.querySelectorAll('*'));
+                        for (const child of children) {
+                            if (child.shadowRoot) {
+                                findElementsRecursively(child.shadowRoot, selector, results);
+                            }
                         }
-                        return null;
+                        return results;
                     }
-                    const root = getShadowRoot();
-                    if (!root) return null;
-                    const cards = Array.from(root.querySelectorAll(selList.join(', ')));
+                    
+                    const cards = [];
+                    for (const sel of selList) {
+                        findElementsRecursively(document, sel, cards);
+                    }
                     if (cards.length === 0) return null;
                     
                     // Filter by visibility
@@ -204,19 +211,19 @@ class FloatingToastHelper {
                 await page.waitForTimeout(2000);
 
                 let isModalVisible = await page.evaluate((selList) => {
-                    function findDeep(s) {
-                        const el = document.querySelector(s);
+                    function findRecursively(root, s) {
+                        const el = root.querySelector(s);
                         if (el) return el;
-                        const all = document.querySelectorAll('*');
-                        for (const n of all) {
-                            if (n.shadowRoot) {
-                                const res = n.shadowRoot.querySelector(s);
-                                if (res) return res;
+                        const children = Array.from(root.querySelectorAll('*'));
+                        for (const child of children) {
+                            if (child.shadowRoot) {
+                                const found = findRecursively(child.shadowRoot, s);
+                                if (found) return found;
                             }
                         }
                         return null;
                     }
-                    const popup = findDeep(selList.join(', '));
+                    const popup = findRecursively(document, selList.join(', '));
                     if (!popup) return false;
                     const style = window.getComputedStyle(popup);
                     const rect = popup.getBoundingClientRect();
@@ -242,19 +249,19 @@ class FloatingToastHelper {
                     if (expandedBox) {
                         // 🛡️ Geometric Probe (Truth Injection)
                         const truncationCheck = await page.evaluate((selList) => {
-                            function findDeep(s) {
-                                const el = document.querySelector(s);
+                            function findRecursively(root, s) {
+                                const el = root.querySelector(s);
                                 if (el) return el;
-                                const all = document.querySelectorAll('*');
-                                for (const n of all) {
-                                    if (n.shadowRoot) {
-                                        const res = n.shadowRoot.querySelector(s);
-                                        if (res) return res;
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) {
+                                        const found = findRecursively(child.shadowRoot, s);
+                                        if (found) return found;
                                     }
                                 }
                                 return null;
                             }
-                            const popup = findDeep(selList.join(', '));
+                            const popup = findRecursively(document, selList.join(', '));
                             if (popup) {
                                 const rect = popup.getBoundingClientRect();
                                 const distToBottom = window.innerHeight - rect.bottom;
@@ -270,19 +277,19 @@ class FloatingToastHelper {
 
                         // 📸 Capture top-half of the modal
                         const compositeRect = await page.evaluate((selList) => {
-                            function findDeep(s) {
-                                const el = document.querySelector(s);
+                            function findRecursively(root, s) {
+                                const el = root.querySelector(s);
                                 if (el) return el;
-                                const all = document.querySelectorAll('*');
-                                for (const n of all) {
-                                    if (n.shadowRoot) {
-                                        const res = n.shadowRoot.querySelector(s);
-                                        if (res) return res;
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) {
+                                        const found = findRecursively(child.shadowRoot, s);
+                                        if (found) return found;
                                     }
                                 }
                                 return null;
                             }
-                            const popup = findDeep(selList.join(', '));
+                            const popup = findRecursively(document, selList.join(', '));
                             if (!popup) return null;
                             const rect = popup.getBoundingClientRect();
                             return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
@@ -302,19 +309,19 @@ class FloatingToastHelper {
 
                         // 📜 Scroll modal to bottom
                         await page.evaluate((selList) => {
-                            function findDeep(s) {
-                                const el = document.querySelector(s);
+                            function findRecursively(root, s) {
+                                const el = root.querySelector(s);
                                 if (el) return el;
-                                const all = document.querySelectorAll('*');
-                                for (const n of all) {
-                                    if (n.shadowRoot) {
-                                        const res = n.shadowRoot.querySelector(s);
-                                        if (res) return res;
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) {
+                                        const found = findRecursively(child.shadowRoot, s);
+                                        if (found) return found;
                                     }
                                 }
                                 return null;
                             }
-                            const modal = findDeep(selList.join(', '));
+                            const modal = findRecursively(document, selList.join(', '));
                             if (modal) {
                                 // Locate the scrollable modal container
                                 const innerContent = modal.querySelector('.fs-modal-content, [class*="modal-content"]');
@@ -338,23 +345,23 @@ class FloatingToastHelper {
 
                         // ❌ Close Modal
                         const closed = await page.evaluate((selList, btnList) => {
-                            function findDeep(s) {
-                                const el = document.querySelector(s);
+                            function findRecursively(root, s) {
+                                const el = root.querySelector(s);
                                 if (el) return el;
-                                const all = document.querySelectorAll('*');
-                                for (const n of all) {
-                                    if (n.shadowRoot) {
-                                        const res = n.shadowRoot.querySelector(s);
-                                        if (res) return res;
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) {
+                                        const found = findRecursively(child.shadowRoot, s);
+                                        if (found) return found;
                                     }
                                 }
                                 return null;
                             }
-                            const modal = findDeep(selList.join(', '));
+                            const modal = findRecursively(document, selList.join(', '));
                             if (modal) {
                                 // Find close button inside shadowRoot or light DOM
                                 for (const bSel of btnList) {
-                                    const btn = modal.querySelector(bSel) || findDeep(bSel);
+                                    const btn = modal.querySelector(bSel) || findRecursively(modal.shadowRoot || modal, bSel);
                                     if (btn) {
                                         btn.click();
                                         return true;
@@ -382,19 +389,19 @@ class FloatingToastHelper {
                 } else {
                     console.log(`[FloatingToastHelper] ⚠️ Modal failed to open for: "${reviewerName}"`);
                     const popupExists = await page.evaluate((selList) => {
-                        function findDeep(s) {
-                            const el = document.querySelector(s);
+                        function findRecursively(root, s) {
+                            const el = root.querySelector(s);
                             if (el) return el;
-                            const all = document.querySelectorAll('*');
-                            for (const n of all) {
-                                if (n.shadowRoot) {
-                                    const res = n.shadowRoot.querySelector(s);
-                                    if (res) return res;
+                            const children = Array.from(root.querySelectorAll('*'));
+                            for (const child of children) {
+                                if (child.shadowRoot) {
+                                    const found = findRecursively(child.shadowRoot, s);
+                                    if (found) return found;
                                 }
                             }
                             return null;
                         }
-                        const popup = findDeep(selList.join(', '));
+                        const popup = findRecursively(document, selList.join(', '));
                         return popup ? {
                             tagName: popup.tagName,
                             className: popup.className,

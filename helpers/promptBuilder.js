@@ -94,7 +94,9 @@ class PromptBuilder {
         text: f.comment?.substring(0, 1000) || "N/A",
         platform: f.social_platform?.name || (typeof f.social_platform === 'string' ? f.social_platform : "Unknown"),
         slug: f.social_platform?.slug || (typeof f.social_platform === 'string' ? f.social_platform : "N/A"),
-        rating: (f.rating !== null && f.rating !== undefined) ? f.rating : 0,
+        rating: (f.rating_type === 'star')
+          ? ((f.response !== null && f.response !== undefined && f.response !== '') ? (isNaN(Number(f.response)) ? 5 : Number(f.response)) : 0)
+          : ((f.rating !== null && f.rating !== undefined) ? Number(f.rating) : 0),
         feed_type: f.feed_type || "text_feed",
         url: f.display_review_url || f.review_url || "N/A",
         tracking_id: trackingId,
