@@ -29,7 +29,7 @@ class BasecampHelper {
                 runDetails += `Reason: ${reason}\n`;
             }
 
-            if (run.aiAnalysis && run.aiAnalysis.feature_results) {
+            if (!run.error && run.aiAnalysis && run.aiAnalysis.feature_results) {
                 runDetails += `\nVerification Results:\n`;
                 run.aiAnalysis.feature_results.forEach(f => {
                     const fEmoji = f.status === "PASS" ? "" : (f.status === "FAIL" ? "" : "⚠️ ");
@@ -42,7 +42,7 @@ class BasecampHelper {
                 });
             }
 
-            if (run.aiAnalysis && run.aiAnalysis.aesthetic_results) {
+            if (!run.error && run.aiAnalysis && run.aiAnalysis.aesthetic_results) {
                 runDetails += `\nUI Aesthetic Checks:\n`;
                 run.aiAnalysis.aesthetic_results.forEach(a => {
                     runDetails += `- ${a.category}: ${a.issue} | ${a.severity || 'N/A'} | ${a.status}\n`;
