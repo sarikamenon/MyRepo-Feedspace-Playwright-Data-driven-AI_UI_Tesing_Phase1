@@ -35,14 +35,14 @@ jobs:
 
       - name: Run AI Visual Validation
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BASECAMP_TOKEN: ${{ secrets.BASECAMP_TOKEN }}
-          BASECAMP_ACCOUNT_ID: 4294983
-          BASECAMP_PROJECT_ID: 19240348
-          BASECAMP_CHAT_ID: 7605911660
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+          BASECAMP_TOKEN: '${{ secrets.BASECAMP_TOKEN }}'
+          BASECAMP_ACCOUNT_ID: '4294983'
+          BASECAMP_PROJECT_ID: '19240348'
+          BASECAMP_CHAT_ID: '7605911660'
+          GITHUB_SERVER_URL: '${{ github.server_url }}'
+          GITHUB_REPOSITORY: '${{ github.repository }}'
+          GITHUB_RUN_ID: '${{ github.run_id }}'
         run: node runners/runApiValidation.js
 
       - name: Commit Processed URLs Progress
