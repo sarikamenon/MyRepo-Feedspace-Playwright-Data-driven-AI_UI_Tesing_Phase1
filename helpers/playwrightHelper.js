@@ -89,6 +89,150 @@ const DISTRACTION_SELECTORS = [
 ];
 
 class PlaywrightHelper {
+    static async checkReachability(url, maxAttempts = 3, targetWidgetId = null) {
+        const axios = require('axios');
+        const https = require('https');
+
+        let attempts = 0;
+        let lastError = null;
+
+        // Extract widget ID from URL ONLY if the URL belongs to feedspace domain
+        let widgetId = targetWidgetId;
+        if (!widgetId && url.includes('feedspace.io')) {
+            const uuidMatch = url.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+            if (uuidMatch) {
+                widgetId = uuidMatch[0];
+            }
+        }
+
+        while (attempts < maxAttempts) {
+            attempts++;
+            try {
+                const response = await axios.get(url, {
+                    timeout: 8000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                    },
+                    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+                    validateStatus: (status) => true
+                });
+
+                const status = response.status;
+                if (status === 404) {
+                    return {
+                        status: 'NOT_FOUND',
+                        error_code: 'HTTP_404',
+                        message: 'Page not found (404)'
+                    };
+                }
+                if (status === 401 || status === 403) {
+                    return {
+                        status: 'ACCESS_DENIED',
+                        error_code: status === 401 ? 'HTTP_401' : 'HTTP_403',
+                        message: status === 401 ? 'Access denied (401)' : 'Access denied (403)'
+                    };
+                }
+                if (status >= 500) {
+                    lastError = {
+                        status: 'UNREACHABLE',
+                        error_code: `HTTP_${status}`,
+                        message: `Server returned an error (${status})`
+                    };
+                } else {
+                    // REACHABLE: Check if the widget is empty before returning REACHABLE
+                    const html = response.data || '';
+                    if (!widgetId && typeof html === 'string') {
+                        const dataIdMatch = html.match(/class=["']?[^"'>]*feedspace[^"'>]*["']?[^>]*data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i) ||
+                            html.match(/data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i) ||
+                            html.match(/unique_widget_id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i);
+                        if (dataIdMatch) {
+                            widgetId = dataIdMatch[1];
+                        } else {
+                            const idx = html.toLowerCase().indexOf('feedspace');
+                            if (idx !== -1) {
+                                const context = html.substring(Math.max(0, idx - 100), Math.min(html.length, idx + 300));
+                                const uuidMatch = context.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+                                if (uuidMatch) {
+                                    widgetId = uuidMatch[0];
+                                }
+                            }
+                        }
+                    }
+
+                    if (widgetId) {
+                        try {
+                            const configRes = await axios.get(`https://api.feedspace.io/v3/embed/${widgetId}`, {
+                                timeout: 5000,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                                },
+                                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+                            });
+
+                            const configData = configRes.data?.data || configRes.data;
+                            if (configData) {
+                                const widgetData = configData.widget_data;
+                                const hasZeroFeeds = !widgetData ||
+                                    (typeof widgetData === 'object' && Object.keys(widgetData).length === 0) ||
+                                    (Array.isArray(widgetData.feeds) && widgetData.feeds.length === 0) ||
+                                    (Array.isArray(widgetData.feeds_data) && widgetData.feeds_data.length === 0);
+
+                                if (hasZeroFeeds) {
+                                    return {
+                                        status: 'EMPTY_WIDGET',
+                                        error_code: 'EMPTY_WIDGET',
+                                        message: 'The Feedspace widget contains zero active feeds/reviews'
+                                    };
+                                }
+                            }
+                        } catch (configError) {
+                            console.warn(`[Prevalidation] Failed to fetch config for widget ID ${widgetId}: ${configError.message}`);
+                        }
+                    }
+
+                    return {
+                        status: 'REACHABLE',
+                        error_code: null,
+                        message: null
+                    };
+                }
+            } catch (error) {
+                let status = 'UNREACHABLE';
+                let error_code = 'CONNECTION_ERROR';
+                let message = `CONNECTION_ERROR: ${error.message}`;
+
+                const code = error.code || '';
+                const msg = (error.message || '').toLowerCase();
+
+                if (code === 'ENOTFOUND' || msg.includes('getaddrinfo')) {
+                    error_code = 'DNS_RESOLUTION_FAILED';
+                    message = 'Website address could not be resolved';
+                } else if (code === 'ECONNREFUSED') {
+                    error_code = 'CONNECTION_REFUSED';
+                    message = 'Connection refused by website';
+                } else if (code === 'ETIMEDOUT' || code === 'ECONNABORTED' || msg.includes('timeout')) {
+                    error_code = 'REQUEST_TIMEOUT';
+                    message = 'Website response timed out';
+                } else if (msg.includes('ssl') || msg.includes('tls') || msg.includes('certificate') || msg.includes('proto')) {
+                    error_code = 'SSL_ERROR';
+                    message = 'SSL/Secure connection error';
+                }
+
+                lastError = { status, error_code, message };
+            }
+
+            if (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+
+        return lastError || {
+            status: 'UNREACHABLE',
+            error_code: 'CONNECTION_ERROR',
+            message: 'Connection failed or website is down'
+        };
+    }
+
     constructor(page) {
         this.page = page;
         this.aiEngine = new AIEngine();
@@ -319,15 +463,15 @@ class PlaywrightHelper {
                     window.dispatchEvent(new Event(evtType));
                     document.dispatchEvent(new Event(evtType));
                 });
-            } catch (e) {}
-        }).catch(() => {});
+            } catch (e) { }
+        }).catch(() => { });
 
         // 2. Playwright-native interaction fallback
         try {
             await this.page.mouse.move(200, 200);
             await this.page.mouse.wheel(0, 100);
             await this.page.mouse.wheel(0, -100);
-        } catch (e) {}
+        } catch (e) { }
 
         // --- SMART SCROLL FALLBACK ---
         // Trigger lazy-loaded scripts by scrolling the page early.
@@ -342,7 +486,7 @@ class PlaywrightHelper {
                 const candidate = candidates.nth(i);
                 if (await candidate.isVisible().catch(() => false)) {
                     console.log(`[PlaywrightHelper] Scrolling candidate ${i + 1}/${count} into view...`);
-                    await candidate.scrollIntoViewIfNeeded().catch(() => {});
+                    await candidate.scrollIntoViewIfNeeded().catch(() => { });
                     await this._sleep(1000); // Give it a moment to trigger Sentinel loading
                 }
             }
@@ -394,22 +538,22 @@ class PlaywrightHelper {
                 const closePatterns = [
                     'chiudi', 'close', 'accept', 'acconsento', 'agree', 'ok', 'understand', 'got it', 'dismiss', 'ho capito'
                 ];
-                
+
                 // Search for buttons or elements that look like close/accept buttons
                 const elements = Array.from(document.querySelectorAll('button, a, span, div, i'));
                 let clicked = 0;
 
                 for (const el of elements) {
                     const text = (el.innerText || el.textContent || '').trim().toLowerCase();
-                    const isMatch = closePatterns.includes(text) || 
-                                    (text === 'x' && el.offsetWidth < 50) ||
-                                    (el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('close'));
+                    const isMatch = closePatterns.includes(text) ||
+                        (text === 'x' && el.offsetWidth < 50) ||
+                        (el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('close'));
 
                     if (isMatch) {
                         const style = window.getComputedStyle(el);
-                        const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0 && 
-                                          style.display !== 'none' && style.visibility !== 'hidden' && 
-                                          style.opacity !== '0';
+                        const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0 &&
+                            style.display !== 'none' && style.visibility !== 'hidden' &&
+                            style.opacity !== '0';
 
                         if (isVisible) {
                             el.click();
@@ -484,7 +628,10 @@ class PlaywrightHelper {
             const count = await allMatches.count();
 
             if (count === 0) {
-                const reason = 'No Feedspace widget selectors matched on the page. Tried 30+ variants (shadow-piercing) and verified DOM/Network state; no Feedspace elements were detected or embedded.';
+                const signInResult = await this._handleSignInPage();
+                if (signInResult) return signInResult;
+
+                const reason = 'Empty State: No widget embedded or visible from the frontend (No Feedspace widget selectors matched on the page)';
                 console.warn(`[PlaywrightHelper] 🛑 ${reason}`);
                 this.widgetType = 'Widget Not Found';
                 this.typeMatchResult = {
@@ -606,25 +753,30 @@ class PlaywrightHelper {
 
             // FINAL DIAGNOSTIC: Check if it's found in network but hidden in UI
             if (isNetworkMatched && (!locator && bestHiddenLocator)) {
+                const reason = `Empty State: No widget embedded or visible from the frontend (Network intercepted widget ${this.expectedType} but the container is hidden or missing from the rendered DOM)`;
                 console.warn(`[PlaywrightHelper] 🚨 Container Detection Failure: Network Intercept matched ${this.expectedType} but the container is HIDDEN.`);
                 this.widgetType = this.expectedType;
                 this.typeMatchResult = {
                     expected: this.expectedType,
                     detected: this.expectedType,
                     matched: false, // Explicitly marked as NOT matched for reporting
-                    reason: `Network intercepted widget ${this.expectedType} but it could not be identified on the UI. The container is likely hidden (display: none) or missing from the rendered DOM.`
+                    reason: reason
                 };
 
-                if (!this.page.isClosed()) {
-                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }));
-                }
-                return this._finalizeAnalysis(screenshotBuffers, this.staticFeatures);
+                return this._buildErrorResult(reason);
             }
 
             if (!locator && !isNetworkMatched) {
+                const signInResult = await this._handleSignInPage();
+                if (signInResult) return signInResult;
+
                 const seenTypes = [...new Set(Object.values(this.networkWidgetMap))];
-                const typeInfo = seenTypes.length > 0 ? ` (Detected ${seenTypes.join(', ')} instead)` : '';
-                const reason = `Widget Identification Failure: No valid container or network signature found for ${this.expectedType}.${typeInfo} Since the widget is not physically present on the UI, further interactions and AI visual checks have been skipped to prevent "Ghost Failures".`;
+                let reason;
+                if (seenTypes.length > 0) {
+                    reason = `Configuration Mismatch: Expected widget type ${this.expectedType}, but widget identified as ${seenTypes.join(', ')}`;
+                } else {
+                    reason = `Empty State: No widget embedded or visible from the frontend (No valid container or network signature found for ${this.expectedType})`;
+                }
                 console.warn(`[PlaywrightHelper] ⚠️  ${reason}`);
                 this.widgetType = 'Widget Not Found';
                 this.typeMatchResult = {
@@ -634,11 +786,7 @@ class PlaywrightHelper {
                     reason: reason
                 };
 
-                // 📸 Capture a diagnostic screenshot of the "empty" page for the report
-                if (!this.page.isClosed()) {
-                    screenshotBuffers.push(await this.page.screenshot({ fullPage: true }).catch(() => null));
-                }
-                return this._finalizeAnalysis(screenshotBuffers.filter(Boolean), this.staticFeatures);
+                return this._buildErrorResult(reason);
             }
 
             // --- Continue with normal flow if visible match was found ---
@@ -663,8 +811,8 @@ class PlaywrightHelper {
                     const isRealFeedspace = await locator.evaluate(el => {
                         const classes = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
                         const html = el.innerHTML ? el.innerHTML.toLowerCase() : '';
-                        const hasAttr = Array.from(el.attributes).some(attr => 
-                            attr.name.includes('feedspace') || attr.value.includes('feedspace') || 
+                        const hasAttr = Array.from(el.attributes).some(attr =>
+                            attr.name.includes('feedspace') || attr.value.includes('feedspace') ||
                             attr.name.includes('unique_widget_id') || attr.name.includes('widget_type_id')
                         );
                         return classes.includes('feedspace') || classes.includes('fe-') || html.includes('feedspace') || hasAttr;
@@ -841,20 +989,20 @@ class PlaywrightHelper {
                     pollAttempts++;
                     domTruth = await locator.evaluate(el => {
                         const iconSels = [
-                            '.feedspace-d6-header-icon', '.feedspace-element-header-icon', 
-                            'img[src*="social-icons"]', 'a[aria-label*=".com"]', 
-                            '[class*="platform-icon"]', '.fe-platform-icon', 
+                            '.feedspace-d6-header-icon', '.feedspace-element-header-icon',
+                            'img[src*="social-icons"]', 'a[aria-label*=".com"]',
+                            '[class*="platform-icon"]', '.fe-platform-icon',
                             '[class*="platform-logo"]', 'svg[class*="platform"]'
                         ];
                         const starSels = [
-                            '.feedspace-rating', '.star-rating', 'svg[class*="star"]', 
-                            '.fe-stars', '.fe-rating-icon', '[class*="rating-star"]', 
-                            '.fs-stars-wrapper', '.fs-rating-star', '.fas.fa-star', 
+                            '.feedspace-rating', '.star-rating', 'svg[class*="star"]',
+                            '.fe-stars', '.fe-rating-icon', '[class*="rating-star"]',
+                            '.fs-stars-wrapper', '.fs-rating-star', '.fas.fa-star',
                             '.far.fa-star', '[class*="star-icon"]', '[class*="star"]'
                         ];
                         const itemSels = [
                             '.feedspace-card', '.fe-feed-item', '.review-card',
-                            '[class*="feed-box"]', '[class*="review-card"]', 
+                            '[class*="feed-box"]:not([class*="-wrap"]):not([class*="-inner"]):not([class*="-header"]):not([class*="-row"]):not([class*="-footer"])', '[class*="review-card"]',
                             '[class*="-element-d"]',
                             '.feedspace-reviewer-name', '.fe-name', '.fe-reviewer-name',
                             '[data-feed-id]', '.fe-review-body', '.feedspace-body',
@@ -905,11 +1053,107 @@ class PlaywrightHelper {
                     }
                 }
 
-                if (domTruth.itemCount === 0) {
-                    console.warn('[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE CONFIRMED. No review cards found after 10s polling.');
-                    this.geometricWarnings.push(`EMPTY_STATE_FORCE_PASS: This widget (${this.expectedType}) is currently empty with zero reviews. FORCE PASS all features that require cards (Ratings, Dates, Icons, Read More). This is NOT a failure.`);
+                // Backup check via config widget_data
+                const hasZeroFeeds = this.config && (
+                    (this.config.widget_data !== undefined && this.config.widget_data !== null && typeof this.config.widget_data === 'object' && Object.keys(this.config.widget_data).length === 0) ||
+                    (this.config.widget_data && Array.isArray(this.config.widget_data.feeds) && this.config.widget_data.feeds.length === 0) ||
+                    (this.config.widget_data && Array.isArray(this.config.widget_data.feeds_data) && this.config.widget_data.feeds_data.length === 0)
+                );
+
+                if (domTruth.itemCount === 0 || hasZeroFeeds) {
+                    const reason = 'Empty State: The widget contains zero visible/active reviews on the frontend';
+                    console.warn(`[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE CONFIRMED. ${reason}`);
+                    this.widgetType = this.expectedType;
+                    this.typeMatchResult = {
+                        expected: this.expectedType,
+                        detected: this.widgetType,
+                        matched: true,
+                        reason: reason
+                    };
+                    await this._restoreIsolatedElements();
+                    return this._buildErrorResult(reason);
                 } else {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Found ${domTruth.itemCount} item(s) after ${pollAttempts} poll(s).`);
+                }
+
+                let isBrandingClipped = false;
+                let isCardClipped = false;
+
+                if (domTruth.itemCount > 0) {
+                    try {
+                        const clippingStatus = await locator.evaluate(el => {
+                            const isElementClippedVerticallyByAncestors = (elem) => {
+                                const rect = elem.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) return true;
+
+                                let parent = elem.parentElement;
+                                while (parent) {
+                                    const style = window.getComputedStyle(parent);
+                                    const hasVerticalOverflow = style.overflow === 'hidden' || style.overflowY === 'hidden';
+                                    if (hasVerticalOverflow) {
+                                        const pRect = parent.getBoundingClientRect();
+                                        const isClipped = rect.bottom > pRect.bottom + 2 || rect.top < pRect.top - 2;
+                                        if (isClipped) return true;
+                                    }
+                                    parent = parent.parentElement || (parent.getRootNode && parent.getRootNode().host);
+                                }
+                                return false;
+                            };
+
+                            const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
+                            const findBranding = (root) => {
+                                const list = [];
+                                for (const sel of brandingSels) {
+                                    const found = Array.from(root.querySelectorAll(sel)).filter(item => {
+                                        const rect = item.getBoundingClientRect();
+                                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(item).display !== 'none';
+                                    });
+                                    list.push(...found);
+                                }
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) list.push(...findBranding(child.shadowRoot));
+                                }
+                                return list;
+                            };
+                            const brandings = findBranding(el.shadowRoot || el);
+                            for (const sel of brandingSels) {
+                                const found = Array.from(document.querySelectorAll(sel)).filter(item => {
+                                    const rect = item.getBoundingClientRect();
+                                    return rect.width > 0 && rect.height > 0 && window.getComputedStyle(item).display !== 'none';
+                                });
+                                brandings.push(...found);
+                            }
+
+                            const brandingClipped = brandings.length === 0 || brandings.every(b => isElementClippedVerticallyByAncestors(b));
+
+                            const cardSels = ['.feedspace-card', '.fe-feed-item', '.review-card', '[class*="feed-box"]:not([class*="-wrap"]):not([class*="-inner"]):not([class*="-header"]):not([class*="-row"]):not([class*="-footer"])', '[class*="review-card"]'];
+                            const findCards = (root) => {
+                                const list = [];
+                                for (const sel of cardSels) {
+                                    const found = Array.from(root.querySelectorAll(sel)).filter(item => {
+                                        const rect = item.getBoundingClientRect();
+                                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(item).display !== 'none';
+                                    });
+                                    list.push(...found);
+                                }
+                                const children = Array.from(root.querySelectorAll('*'));
+                                for (const child of children) {
+                                    if (child.shadowRoot) list.push(...findCards(child.shadowRoot));
+                                }
+                                return list;
+                            };
+                            const cards = findCards(el.shadowRoot || el);
+                            const cardClipped = cards.length > 0 && cards.some(c => isElementClippedVerticallyByAncestors(c));
+
+                            return { brandingClipped, cardClipped };
+                        }).catch(() => ({ brandingClipped: false, cardClipped: false }));
+
+                        isBrandingClipped = clippingStatus.brandingClipped;
+                        isCardClipped = clippingStatus.cardClipped;
+                    } catch (err) {
+                        console.warn(`[PlaywrightHelper] Clipping evaluation failed: ${err.message}`);
+                    }
                 }
 
                 if (domTruth.iconsFound) {
@@ -917,9 +1161,22 @@ class PlaywrightHelper {
                     this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
                 if (domTruth.brandingFound) {
-                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding DETECTED.`);
-                    this.geometricWarnings.push("DOM_TRUTH: Feedspace Branding (Pill/Badge) IS present at the bottom or edge of the widget. You MUST report it as 'Visible'. Check all provided screenshots, including the dedicated branding shot.");
+                    if (isBrandingClipped) {
+                        console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding is CLIPPED by ancestors.`);
+                        this.geometricWarnings.push("DOM_TRUTH_BRANDING_ABSENT: Feedspace branding is present in the DOM but visually clipped/truncated by the parent webpage layout constraints.");
+                    } else {
+                        console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding DETECTED.`);
+                        this.geometricWarnings.push("DOM_TRUTH: Feedspace Branding (Pill/Badge) IS present at the bottom or edge of the widget. You MUST report it as 'Visible'. Check all provided screenshots, including the dedicated branding shot.");
+                    }
+                } else {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding NOT FOUND in DOM.`);
+                    this.geometricWarnings.push("DOM_TRUTH_BRANDING_ABSENT: Feedspace branding is absent from the DOM.");
                 }
+                if (isCardClipped) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review cards are CLIPPED by ancestors.`);
+                    this.geometricWarnings.push("DOM_TRUTH_CARD_CLIPPED: The review cards (boundary lines) are visually clipped/truncated at the bottom by parent webpage layout constraints (overflow: hidden). This means the boundary line of the card is missing/cut off in the UI.");
+                }
+
                 if (!domTruth.starsFound && domTruth.itemCount > 0) {
                     if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND on base widget. AI must check expanded popups.`);
@@ -929,9 +1186,152 @@ class PlaywrightHelper {
                         this.geometricWarnings.push("DOM_TRUTH: Review Ratings (Stars) are NOT present inside the widget review cards. Ignore any stars visible on the background page outside the widget.");
                     }
                 }
+
+                // Check if navigation/indicator controls are required based on review count
+                try {
+                    const rawFeeds = this.config?.feeds_data || this.config?.data?.feeds_data || this.config?.widget_data?.feeds_data || [];
+                    const renderedCardsCount = await locator.evaluate(el => {
+                        return el.querySelectorAll('.swiper-slide, .slick-slide, .feedspace-card, .fe-feed-item, [class*="review-card"]').length;
+                    }).catch(() => 0);
+
+                    const reviewsCount = rawFeeds.length || renderedCardsCount;
+
+                    if (reviewsCount > 0 && reviewsCount <= 4) {
+                        console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Widget has only ${reviewsCount} reviews (<= 4). Navigation/indicator controls are NOT required.`);
+                        this.geometricWarnings.push("SLIDER_NO_NAVIGATION_REQUIRED: The widget has 4 or fewer reviews. Navigation controls (Left & Right Buttons/Shift Buttons) and Slider Indicators (dots) are NOT required in this layout and their absence is expected and a PASS.");
+                    }
+
+                    // Sniff presence and clipping of arrows and indicators inside the Feedspace widget container (with Shadow DOM piercing)
+                    const arrowStatus = await locator.evaluate(el => {
+                        const isElementClippedVerticallyByAncestors = (elem) => {
+                            const rect = elem.getBoundingClientRect();
+                            if (rect.width === 0 || rect.height === 0) return true;
+                            let parent = elem.parentElement;
+                            while (parent) {
+                                const style = window.getComputedStyle(parent);
+                                const hasVerticalOverflow = style.overflow === 'hidden' || style.overflowY === 'hidden';
+                                if (hasVerticalOverflow) {
+                                    const pRect = parent.getBoundingClientRect();
+                                    const isClipped = rect.bottom > pRect.bottom + 2 || rect.top < pRect.top - 2;
+                                    if (isClipped) return true;
+                                }
+                                parent = parent.parentElement || (parent.getRootNode && parent.getRootNode().host);
+                            }
+                            return false;
+                        };
+
+                        const arrowSels = ['.swiper-button-next', '.swiper-button-prev', '.slick-next', '.slick-prev', '[class*="arrow"]', '[class*="prev"]', '[class*="next"]'];
+                        const pierceFind = (root) => {
+                            const list = [];
+                            for (const sel of arrowSels) {
+                                const found = Array.from(root.querySelectorAll(sel)).filter(item => {
+                                    const rect = item.getBoundingClientRect();
+                                    return rect.width > 0 && rect.height > 0 && window.getComputedStyle(item).display !== 'none';
+                                });
+                                list.push(...found);
+                            }
+                            const children = Array.from(root.querySelectorAll('*'));
+                            for (const child of children) {
+                                if (child.shadowRoot) list.push(...pierceFind(child.shadowRoot));
+                            }
+                            return list;
+                        };
+                        const arrows = pierceFind(el.shadowRoot || el);
+                        if (arrows.length === 0) return { present: false, clipped: false };
+                        const allClipped = arrows.every(item => isElementClippedVerticallyByAncestors(item));
+                        return { present: true, clipped: allClipped };
+                    }).catch(() => ({ present: false, clipped: false }));
+
+                    const indicatorStatus = await locator.evaluate(el => {
+                        const isElementClippedVerticallyByAncestors = (elem) => {
+                            const rect = elem.getBoundingClientRect();
+                            if (rect.width === 0 || rect.height === 0) return true;
+                            let parent = elem.parentElement;
+                            while (parent) {
+                                const style = window.getComputedStyle(parent);
+                                const hasVerticalOverflow = style.overflow === 'hidden' || style.overflowY === 'hidden';
+                                if (hasVerticalOverflow) {
+                                    const pRect = parent.getBoundingClientRect();
+                                    const isClipped = rect.bottom > pRect.bottom + 2 || rect.top < pRect.top - 2;
+                                    if (isClipped) return true;
+                                }
+                                parent = parent.parentElement || (parent.getRootNode && parent.getRootNode().host);
+                            }
+                            return false;
+                        };
+
+                        const indicatorSels = ['.swiper-pagination', '.slick-dots', '[class*="pagination"]', '[class*="dots"]', '[class*="indicator"]'];
+                        const pierceFind = (root) => {
+                            const list = [];
+                            for (const sel of indicatorSels) {
+                                const found = Array.from(root.querySelectorAll(sel)).filter(item => {
+                                    const rect = item.getBoundingClientRect();
+                                    return rect.width > 0 && rect.height > 0 && window.getComputedStyle(item).display !== 'none';
+                                });
+                                list.push(...found);
+                            }
+                            const children = Array.from(root.querySelectorAll('*'));
+                            for (const child of children) {
+                                if (child.shadowRoot) list.push(...pierceFind(child.shadowRoot));
+                            }
+                            return list;
+                        };
+                        const indicators = pierceFind(el.shadowRoot || el);
+                        if (indicators.length === 0) return { present: false, clipped: false };
+                        const allClipped = indicators.every(item => isElementClippedVerticallyByAncestors(item));
+                        return { present: true, clipped: allClipped };
+                    }).catch(() => ({ present: false, clipped: false }));
+
+                    if (!arrowStatus.present) {
+                        console.log('[PlaywrightHelper] 🛰️  DOM Sniff: Navigation arrows NOT found inside Feedspace widget container.');
+                        this.geometricWarnings.push("DOM_TRUTH_ARROWS_ABSENT: No slider navigation arrows/buttons are present inside the Feedspace widget container in the DOM. Ignore any arrows visible elsewhere on the page.");
+                    } else if (arrowStatus.clipped) {
+                        console.log('[PlaywrightHelper] 🛰️  DOM Sniff: Navigation arrows are present but CLIPPED by ancestors.');
+                        this.geometricWarnings.push("DOM_TRUTH_ARROWS_CLIPPED: Slider navigation arrows are present in the DOM but visually clipped/truncated by the parent webpage layout constraints.");
+                    }
+
+                    if (!indicatorStatus.present) {
+                        console.log('[PlaywrightHelper] 🛰️  DOM Sniff: Slider indicators NOT found inside Feedspace widget container.');
+                        this.geometricWarnings.push("DOM_TRUTH_INDICATORS_ABSENT: No slider indicator dots/lines are present inside the Feedspace widget container in the DOM. Ignore any dots/lines visible elsewhere on the page.");
+                    } else if (indicatorStatus.clipped) {
+                        console.log('[PlaywrightHelper] 🛰️  DOM Sniff: Slider indicators are present but CLIPPED by ancestors.');
+                        this.geometricWarnings.push("DOM_TRUTH_INDICATORS_CLIPPED: Slider indicators are present in the DOM but visually clipped/truncated by the parent webpage layout constraints.");
+                    }
+
+                    // Check if Read More button is present but hidden
+                    const readMoreStatus = await locator.evaluate(el => {
+                        const findReadMore = (root) => {
+                            const buttons = Array.from(root.querySelectorAll('button, a, span')).filter(btn => {
+                                return /Read More/i.test(btn.innerText || btn.textContent);
+                            });
+                            const children = Array.from(root.querySelectorAll('*'));
+                            for (const child of children) {
+                                if (child.shadowRoot) buttons.push(...findReadMore(child.shadowRoot));
+                            }
+                            return buttons;
+                        };
+                        const readMores = findReadMore(el.shadowRoot || el);
+                        if (readMores.length === 0) return { present: false, hidden: false };
+                        const allHidden = readMores.every(btn => {
+                            const style = window.getComputedStyle(btn);
+                            return style.display === 'none' || style.visibility === 'hidden' || btn.classList.contains('hidden');
+                        });
+                        return { present: true, hidden: allHidden };
+                    }).catch(() => ({ present: false, hidden: false }));
+
+                    if (readMoreStatus.present && readMoreStatus.hidden) {
+                        console.log('[PlaywrightHelper] 🛰️  DOM Sniff: Read More buttons are present in DOM but hidden because all reviews are short.');
+                        this.geometricWarnings.push("DOM_TRUTH_READ_MORE_NOT_NEEDED: Read More buttons are present in the DOM but hidden because all review texts are short. This is expected behavior.");
+                    }
+                } catch (e) {
+                    console.warn(`[PlaywrightHelper] Navigation/indicator elements check failed: ${e.message}`);
+                }
             } else {
                 console.warn('[PlaywrightHelper] Skipping DOM Sniff: No valid widget locator found.');
             }
+
+            // Isolate Feedspace widget from page background/interfering widgets
+            await this._isolateWidget();
 
             // ── STEP 6: Widget-specific interaction ──────────────────────────
             const box = locator ? await locator.boundingBox().catch(() => null) : null;
@@ -1072,8 +1472,13 @@ class PlaywrightHelper {
                 }
             }
 
+            // Restore isolated page elements
+            await this._restoreIsolatedElements();
+
         } catch (error) {
             console.error('[PlaywrightHelper] Validation error:', error.message);
+            // Restore isolated page elements in case of failure
+            await this._restoreIsolatedElements();
             if (screenshotBuffers.length === 0 && !this.page.isClosed()) {
                 try {
                     const isMarquee = this.widgetType && (this.widgetType.includes('MARQUEE') || this.widgetType.includes('SLIDER'));
@@ -1228,13 +1633,181 @@ class PlaywrightHelper {
         };
     }
 
+    /**
+     * Hides all elements on the page except the Feedspace containers and their ancestors/descendants.
+     */
+    async _isolateWidget() {
+        try {
+            console.log('[PlaywrightHelper] 🛡️  Isolating Feedspace widget: hiding other page elements to prevent background interference.');
+            await this.page.evaluate((selString) => {
+                const keep = new Set();
+
+                const pierceFind = (root) => {
+                    root.querySelectorAll(selString).forEach(target => {
+                        let curr = target;
+                        while (curr) {
+                            keep.add(curr);
+                            curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
+                        }
+                        const children = target.querySelectorAll('*');
+                        children.forEach(c => {
+                            keep.add(c);
+                            if (c.shadowRoot) {
+                                const subChildren = c.shadowRoot.querySelectorAll('*');
+                                subChildren.forEach(sc => keep.add(sc));
+                            }
+                        });
+                    });
+
+                    root.querySelectorAll('*').forEach(el => {
+                        if (el.shadowRoot) pierceFind(el.shadowRoot);
+                    });
+                };
+
+                pierceFind(document);
+
+                // Now hide everything else
+                const all = document.querySelectorAll('*');
+                all.forEach(el => {
+                    if (!keep.has(el) &&
+                        el.tagName !== 'HTML' &&
+                        el.tagName !== 'BODY' &&
+                        el.tagName !== 'HEAD' &&
+                        el.tagName !== 'SCRIPT' &&
+                        el.tagName !== 'STYLE') {
+
+                        const computedStyle = window.getComputedStyle(el);
+                        if (computedStyle.display !== 'none') {
+                            el.dataset.fsOriginalDisplay = el.style.display || 'block';
+                            el.style.setProperty('display', 'none', 'important');
+                        }
+                    }
+                });
+            }, SELECTOR_STRING);
+        } catch (e) {
+            console.warn('[PlaywrightHelper] Failed to isolate widget:', e.message);
+        }
+    }
+
+    /**
+     * Restores all elements that were hidden by _isolateWidget.
+     */
+    async _restoreIsolatedElements() {
+        try {
+            console.log('[PlaywrightHelper] 🛡️  Restoring hidden page elements.');
+            await this.page.evaluate(() => {
+                const hidden = document.querySelectorAll('[data-fs-original-display]');
+                hidden.forEach(el => {
+                    el.style.display = el.dataset.fsOriginalDisplay === 'block' ? '' : el.dataset.fsOriginalDisplay;
+                    el.removeAttribute('data-fs-original-display');
+                });
+            }).catch(e => console.warn('[PlaywrightHelper] Restore evaluation failed:', e.message));
+        } catch (e) {
+            console.warn('[PlaywrightHelper] Failed to restore elements:', e.message);
+        }
+    }
+
+    async _handleSignInPage() {
+        const currentUrl = this.page.url().toLowerCase();
+        const pageTitle = (await this.page.title().catch(() => '')).toLowerCase();
+
+        const isSignInPage = currentUrl.includes('/signin') ||
+            currentUrl.includes('/login') ||
+            currentUrl.includes('/sign-in') ||
+            (currentUrl.includes('signin') && !currentUrl.includes('feedspace')) ||
+            (currentUrl.includes('login') && !currentUrl.includes('feedspace')) ||
+            pageTitle.includes('login') ||
+            pageTitle.includes('sign in') ||
+            pageTitle.includes('signin');
+
+        if (isSignInPage) {
+            const passMessage = 'This is the sign-in/login page, no Feedspace widgets found';
+            console.log(`[PlaywrightHelper] ℹ️ ${passMessage} (URL: ${this.page.url()})`);
+            this.widgetType = 'Sign-in Page';
+            this.typeMatchResult = {
+                expected: this.expectedType,
+                detected: 'Sign-in Page',
+                matched: true,
+                reason: passMessage
+            };
+
+            const savedPaths = [];
+            try {
+                if (!this.page.isClosed()) {
+                    const buffer = await this.page.screenshot({ fullPage: true }).catch(() => null);
+                    if (buffer) {
+                        const timestamp = Date.now();
+                        const screenshotDir = path.join(process.cwd(), 'screenshots');
+                        if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
+                        const screenshotPath = path.join(screenshotDir, `SigninPage_${timestamp}.png`);
+                        fs.writeFileSync(screenshotPath, buffer);
+                        savedPaths.push(screenshotPath);
+                    }
+                }
+            } catch (e) {
+                console.warn(`[PlaywrightHelper] Could not take signin page screenshot: ${e.message}`);
+            }
+
+            return {
+                expectedType: this.expectedType,
+                widgetType: 'Sign-in Page',
+                typeMatchResult: this.typeMatchResult,
+                capturedConfig: this.config,
+                aiAnalysis: {
+                    overall_status: 'PASS',
+                    summary: passMessage,
+                    feature_results: [{
+                        feature: 'Widget Presence Check',
+                        status: 'PASS',
+                        issue: passMessage
+                    }]
+                },
+                screenshotPath: savedPaths[0] || null,
+                screenshotPaths: savedPaths
+            };
+        }
+        return null;
+    }
+
     _buildErrorResult(reason) {
+        const staticFeatures = this.staticFeatures || [];
+        const featureResults = staticFeatures.map(f => ({
+            feature: typeof f === 'string' ? f : (f.name || 'Unknown'),
+            ui_status: 'Absent',
+            config_status: 'Visible',
+            issue: reason,
+            remarks: 'Feature is absent due to Empty State/No widget embedded.',
+            status: 'FAIL'
+        }));
+
+        if (featureResults.length === 0) {
+            featureResults.push({
+                feature: 'Validation Integrity',
+                ui_status: 'Absent',
+                config_status: 'Visible',
+                issue: reason,
+                remarks: 'Validation failed.',
+                status: 'FAIL'
+            });
+        }
+
+        const aestheticResults = [
+            { category: "A. LAYOUT & SPACING", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "B. ELEMENT CONTAINMENT", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "C. CONTENT & TEXT RENDERING", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "D. AVATAR RENDERING", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "E. MEDIA & IMAGES", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "F. THEME & COLOR VISIBILITY", issue: reason, severity: "CRITICAL", status: "FAIL" },
+            { category: "G. POPUPS & MODALS", issue: reason, severity: "CRITICAL", status: "FAIL" }
+        ];
+
         return {
             expectedType: this.expectedType,
-            widgetType: 'Validation Error',
+            widgetType: this.widgetType || 'Unknown',
+            error: reason,
             typeMatchResult: {
                 expected: this.expectedType,
-                detected: this.widgetType,
+                detected: this.widgetType || 'Unknown',
                 matched: false,
                 reason: reason,
                 networkSawType: this._networkHasType(this.expectedType)
@@ -1242,11 +1815,9 @@ class PlaywrightHelper {
             aiAnalysis: {
                 overall_status: 'FAIL',
                 summary: reason,
-                feature_results: [{
-                    feature: 'Validation Integrity',
-                    status: 'FAIL',
-                    issue: reason
-                }]
+                analysis_message: reason,
+                feature_results: featureResults,
+                aesthetic_results: aestheticResults
             },
             screenshotPaths: []
         };
@@ -1260,7 +1831,7 @@ class PlaywrightHelper {
             console.log(`[PlaywrightHelper] Skipping "Load More" loop for ${type} widget.`);
             // [DEPRECATED] Expand any visible "Read More" for sliders/marquees/toasts
             // await this._expandReadMore(context);
-            
+
             // Just capture the initial state for the storyboard
             if (screenshotBuffers.length === 0) {
                 const initialShot = await context.screenshot({ animations: 'disabled' }).catch(() => null);
@@ -1401,7 +1972,7 @@ class PlaywrightHelper {
 
         // 🛡️ Guard: Skip expansion for Marquee/Slider widgets to prevent "Slice Fail" layout defects
         const isConstrained = this.widgetType && (
-            this.widgetType.includes('MARQUEE') || 
+            this.widgetType.includes('MARQUEE') ||
             this.widgetType.includes('SLIDER') ||
             this.widgetType.includes('CAROUSEL')
         );
@@ -1426,8 +1997,8 @@ class PlaywrightHelper {
                 for (let i = 0; i < count; i++) {
                     const btn = loc.nth(i);
                     if (await btn.isVisible().catch(() => false)) {
-                        console.log(`[PlaywrightHelper] Clicking 'Read More' button ${i+1}`);
-                        await btn.click({ force: true, timeout: 2000 }).catch(() => {});
+                        console.log(`[PlaywrightHelper] Clicking 'Read More' button ${i + 1}`);
+                        await btn.click({ force: true, timeout: 2000 }).catch(() => { });
                         await this._sleep(200); // Animation buffer
                     }
                 }
@@ -1471,19 +2042,19 @@ class PlaywrightHelper {
 
             if (shouldCap) {
                 console.warn(`[PlaywrightHelper] 🛡️  Dimension Guard: Target height (${Math.round(height)}px) exceeds safety limit. Capping at ${MAX_SCREENSHOT_HEIGHT}px.`);
-                
+
                 const originalSize = this.page.viewportSize();
                 const targetWidth = width || (originalSize ? originalSize.width : 1536);
-                
+
                 try {
-                    await this.page.setViewportSize({ 
-                        width: Math.round(targetWidth), 
-                        height: MAX_SCREENSHOT_HEIGHT 
+                    await this.page.setViewportSize({
+                        width: Math.round(targetWidth),
+                        height: MAX_SCREENSHOT_HEIGHT
                     });
-                    
+
                     const shot = await target.screenshot({ ...screenshotOptions, fullPage: false }).catch(() => null);
-                    
-                    if (originalSize) await this.page.setViewportSize(originalSize).catch(() => {});
+
+                    if (originalSize) await this.page.setViewportSize(originalSize).catch(() => { });
                     return shot;
                 } catch (vpError) {
                     console.error(`[PlaywrightHelper] Viewport expansion failed: ${vpError.message}`);

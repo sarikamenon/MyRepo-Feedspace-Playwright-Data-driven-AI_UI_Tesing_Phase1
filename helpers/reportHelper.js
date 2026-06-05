@@ -20,6 +20,15 @@ class ReportHelper {
         // Calculate Granular Summary
         data.summary.per_widget = this.calculatePerWidgetSummary(data.runs);
 
+        // Inject reason property into runs for FAIL/ERROR runs
+        if (Array.isArray(data.runs)) {
+            data.runs.forEach(run => {
+                if (run.status === 'FAIL' || run.status === 'ERROR') {
+                    run.reason = this.getFailureReason(run);
+                }
+            });
+        }
+
         fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));
         console.log(`[ReportHelper] Saved JSON report to ${jsonPath}`);
 
@@ -74,6 +83,36 @@ class ReportHelper {
             case 'ERROR': return 'error';
             default: return 'warn';
         }
+    }
+
+    getFailureReason(run) {
+        if (run.error) {
+            if (run.error.toLowerCase().includes("configuration mismatch") && !run.error.toLowerCase().includes("widget identified as")) {
+                return "Failed due to configuration mismatch";
+            }
+            return run.error;
+        }
+        if (run.aiAnalysis) {
+            if (run.status === 'FAIL' || run.aiAnalysis.overall_status === 'FAIL') {
+                const hasFeatureFail = Array.isArray(run.aiAnalysis.feature_results) && 
+                    run.aiAnalysis.feature_results.some(f => f.status === 'FAIL');
+                const hasAestheticFail = Array.isArray(run.aiAnalysis.aesthetic_results) && 
+                    run.aiAnalysis.aesthetic_results.some(a => a.status === 'FAIL');
+
+                if (hasFeatureFail && hasAestheticFail) {
+                    return "Failed due to both UI issue and configuration mismatch";
+                } else if (hasFeatureFail) {
+                    return "Failed due to configuration mismatch";
+                } else if (hasAestheticFail) {
+                    return "Failed due to UI issue";
+                }
+            }
+            if (run.aiAnalysis.summary) return run.aiAnalysis.summary;
+            if (run.aiAnalysis.analysis_message) {
+                return run.aiAnalysis.analysis_message.split('\n')[0] || run.aiAnalysis.analysis_message;
+            }
+        }
+        return 'Visual validation failed due to feature or aesthetic defects.';
     }
 
     generateHtml(data) {
@@ -184,7 +223,13 @@ class ReportHelper {
                             <span class="badge ${this.getBadgeClass(run.status)}">${run.status}</span>
                         </div>
                         <div class="run-body">
-                            ${run.error ? `<div style="color:red; padding:10px; background:#fff0f0; border-radius:4px;">Error: ${run.error}</div>` : `
+                            ${run.status === 'FAIL' || run.status === 'ERROR' ? `
+                                <div style="margin-bottom: 20px; padding: 12px 20px; background: #fff5f5; border-left: 4px solid #ef4444; border-radius: 4px; font-size: 14px; color: #b91c1c;">
+                                    <strong>Reason:</strong> ${this.getFailureReason(run)}
+                                </div>
+                            ` : ''}
+                            ${run.error && run.status !== 'FAIL' && run.status !== 'ERROR' ? `<div style="color:red; padding:10px; background:#fff0f0; border-radius:4px; margin-bottom: 20px;">Error: ${run.error}</div>` : ''}
+                            ${run.error ? '' : `
                                 <details style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                                     <summary style="padding: 12px 20px; background: #fff5eb; color: #92400e; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
                                         <span>🔍 AI Reasoning / Thinking (Chain of Thought)</span>

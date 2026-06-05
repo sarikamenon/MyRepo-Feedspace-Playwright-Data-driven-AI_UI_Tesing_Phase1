@@ -24,6 +24,10 @@ class BasecampHelper {
             runDetails += `website_url: "${run.url}"\n`;
             runDetails += `Widget type: "${run.widgetType}"\n`;
             runDetails += `Status: ${statusEmoji}${run.status}\n`;
+            if (run.status === "FAIL" || run.status === "ERROR") {
+                const reason = run.reason || run.error || (run.aiAnalysis && run.aiAnalysis.summary) || "Visual validation failed due to feature or aesthetic defects.";
+                runDetails += `Reason: ${reason}\n`;
+            }
 
             if (run.aiAnalysis && run.aiAnalysis.feature_results) {
                 runDetails += `\nVerification Results:\n`;

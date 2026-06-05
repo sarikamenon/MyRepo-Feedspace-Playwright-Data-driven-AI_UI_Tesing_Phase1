@@ -196,9 +196,15 @@ class AIEngine {
 
         // Detect Empty State signal (Harden the detection)
         const isEmptyState = (geometricWarnings || []).some(w =>
-            w.includes('EMPTY_STATE_FORCE_PASS') ||
+            w.includes('EMPTY_STATE_FORCE_FAIL') ||
             w.toLowerCase().includes('zero reviews') ||
             w.toLowerCase().includes('currently empty')
+        ) || (
+            config && (
+                (config.widget_data !== undefined && config.widget_data !== null && typeof config.widget_data === 'object' && Object.keys(config.widget_data).length === 0) ||
+                (config.widget_data && Array.isArray(config.widget_data.feeds) && config.widget_data.feeds.length === 0) ||
+                (config.widget_data && Array.isArray(config.widget_data.feeds_data) && config.widget_data.feeds_data.length === 0)
+            )
         );
 
         if (isEmptyState && aiData.feature_results) {
@@ -211,17 +217,170 @@ class AIEngine {
 
             aiData.feature_results.forEach(res => {
                 const isCardFeature = cardLevelFeatures.includes(res.feature);
-                // If it's a card feature on an empty widget, force PASS (Empty State)
+                // If it's a card feature on an empty widget, force FAIL
                 if (isCardFeature) {
-                    res.status = 'PASS (Empty State)';
+                    res.status = 'FAIL';
                     res.ui_status = 'Absent';
-                    res.issue = 'No visual defects detected (Empty State Pass)';
-                    res.remarks = 'Feature is absent because the widget contains zero review items. This is expected behavior for empty states.';
+                    res.issue = 'Empty State: The widget contains zero review items.';
+                    res.remarks = 'Feature is absent because the widget contains zero reviews. Empty state is treated as FAIL.';
                 }
             });
+
+            // Also force FAIL aesthetic results for empty states
+            if (aiData.aesthetic_results) {
+                console.log(`[AIEngine] 🛡️ Empty State aesthetic remediation engaged for ${widgetType}.`);
+                const emptyStateAestheticCats = [
+                    "A. LAYOUT & SPACING",
+                    "C. CONTENT & TEXT RENDERING",
+                    "D. AVATAR RENDERING",
+                    "E. MEDIA & IMAGES",
+                    "G. POPUPS & MODALS"
+                ];
+                aiData.aesthetic_results.forEach(res => {
+                    const normCat = res.category.toUpperCase();
+                    const isTargetCat = emptyStateAestheticCats.some(cat => normCat.includes(cat.toUpperCase()));
+                    if (isTargetCat) {
+                        res.status = 'FAIL';
+                        res.issue = 'Empty State: No review cards are visible or rendered.';
+                        res.severity = 'CRITICAL';
+                    }
+                });
+            }
         }
 
         if (!aiData.feature_results) return aiData;
+
+        const noNavigationRequired = (geometricWarnings || []).some(w => 
+            w.includes('SLIDER_NO_NAVIGATION_REQUIRED')
+        );
+        const arrowsAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_ARROWS_ABSENT') || w.includes('DOM_TRUTH_ARROWS_CLIPPED'));
+        const indicatorsAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_INDICATORS_ABSENT') || w.includes('DOM_TRUTH_INDICATORS_CLIPPED'));
+        const brandingAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_BRANDING_ABSENT'));
+        const readMoreNotNeeded = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_READ_MORE_NOT_NEEDED'));
+
+        if (aiData.feature_results) {
+            aiData.feature_results.forEach(res => {
+                const isArrow = res.feature === "Left & Right Buttons" || res.feature === "Left & Right Shift Buttons";
+                const isIndicator = res.feature === "Slider Indicators";
+                const isBranding = res.feature === "Feedspace Branding";
+                const isReadMore = res.feature === "Read More";
+
+                if (isArrow && arrowsAbsent) {
+                    const isClipped = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_ARROWS_CLIPPED'));
+                    res.ui_status = 'Absent';
+                    res.status = noNavigationRequired ? 'PASS' : ((res.config_status === 'Visible') ? 'FAIL' : 'PASS');
+                    res.issue = res.status === 'FAIL' 
+                        ? (isClipped 
+                            ? 'Navigation controls are configured to be visible but are visually clipped/truncated by parent webpage layout constraints.'
+                            : 'Navigation controls are configured to be visible but are not present inside the Feedspace widget container.')
+                        : 'No visual defects detected (Navigation controls are optional for <= 4 reviews)';
+                    res.remarks = res.status === 'FAIL'
+                        ? (isClipped
+                            ? 'Slider navigation arrows/buttons are present in the DOM but visually clipped by parent layout constraints.'
+                            : 'Slider navigation arrows/buttons are absent in the DOM/UI, violating the configured visibility.')
+                        : 'Slider navigation arrows/buttons are absent, which is permitted because the review count is 4 or fewer.';
+                }
+
+                if (isIndicator && indicatorsAbsent) {
+                    const isClipped = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_INDICATORS_CLIPPED'));
+                    res.ui_status = 'Absent';
+                    res.status = noNavigationRequired ? 'PASS' : ((res.config_status === 'Visible') ? 'FAIL' : 'PASS');
+                    res.issue = res.status === 'FAIL' 
+                        ? (isClipped
+                            ? 'Slider indicators are configured to be visible but are visually clipped/truncated by parent webpage layout constraints.'
+                            : 'Slider indicators are configured to be visible but are not present inside the Feedspace widget container.')
+                        : 'No visual defects detected (Slider indicators are optional for <= 4 reviews)';
+                    res.remarks = res.status === 'FAIL'
+                        ? (isClipped
+                            ? 'Slider indicators (dots/pagination) are present in the DOM but visually clipped by parent layout constraints.'
+                            : 'Slider indicators (dots/pagination) are absent in the DOM/UI, violating the configured visibility.')
+                        : 'Slider indicators (dots/pagination) are absent, which is permitted because the review count is 4 or fewer.';
+                }
+
+                if (isBranding && brandingAbsent) {
+                    res.ui_status = 'Absent';
+                    res.status = (res.config_status === 'Visible') ? 'FAIL' : 'PASS';
+                    res.issue = res.status === 'FAIL' 
+                        ? 'Feedspace branding is configured to be visible but is visually clipped/truncated by parent webpage layout constraints.'
+                        : 'No visual defects detected';
+                    res.remarks = res.status === 'FAIL'
+                        ? 'Feedspace branding is visually clipped/truncated by parent layout constraints.'
+                        : 'Feedspace branding is absent but allowed.';
+                }
+
+                if (isReadMore && readMoreNotNeeded) {
+                    res.ui_status = 'Absent';
+                    res.status = 'PASS';
+                    res.issue = 'No visual defects detected (Read More buttons are not needed because all reviews are short)';
+                    res.remarks = 'Read More buttons are present in the DOM but hidden because all review texts are short. This is expected and a PASS.';
+                }
+                
+                // General noNavigationRequired override if not already handled
+                if (noNavigationRequired && (isArrow || isIndicator) && !arrowsAbsent && !indicatorsAbsent) {
+                    res.status = 'PASS';
+                    res.issue = 'No visual defects detected (Navigation controls are optional for <= 4 reviews)';
+                }
+            });
+
+            // Clean up any aesthetic failures related to navigation or read more
+            if (aiData.aesthetic_results) {
+                aiData.aesthetic_results.forEach(res => {
+                    if (res.status === 'FAIL' && res.issue) {
+                        const lowIssue = res.issue.toLowerCase();
+                        if (lowIssue.includes('navigation') || lowIssue.includes('indicator') || lowIssue.includes('arrow') || lowIssue.includes('dot')) {
+                            const hasFailFeature = aiData.feature_results.some(f => 
+                                (f.feature === "Left & Right Buttons" || f.feature === "Left & Right Shift Buttons" || f.feature === "Slider Indicators") && f.status === "FAIL"
+                            );
+                            if (!hasFailFeature) {
+                                res.status = 'PASS';
+                                res.issue = 'No visual defects detected';
+                            }
+                        }
+                        if (lowIssue.includes('read more') || lowIssue.includes('read-more')) {
+                            const hasFailFeature = aiData.feature_results.some(f => 
+                                f.feature === "Read More" && f.status === "FAIL"
+                            );
+                            if (!hasFailFeature) {
+                                res.status = 'PASS';
+                                res.issue = 'No visual defects detected';
+                            }
+                        }
+                    }
+                });
+            }
+
+            // If card boundary lines are clipped by parent webpage constraints, force Category A layout status to FAIL
+            const cardClipped = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_CARD_CLIPPED'));
+            if (cardClipped && aiData.aesthetic_results) {
+                let layoutCategoryFound = false;
+                aiData.aesthetic_results.forEach(res => {
+                    const cat = res.category.toUpperCase();
+                    if (cat.includes("LAYOUT") || cat.includes("A. LAYOUT & SPACING")) {
+                        res.status = "FAIL";
+                        res.issue = "The bottom border/boundary line of the review card(s) is visually clipped/truncated by the parent webpage layout constraints.";
+                        res.severity = "CRITICAL";
+                        layoutCategoryFound = true;
+                    }
+                });
+                if (!layoutCategoryFound) {
+                    aiData.aesthetic_results.push({
+                        category: "A. LAYOUT & SPACING",
+                        status: "FAIL",
+                        issue: "The bottom border/boundary line of the review card(s) is visually clipped/truncated by the parent webpage layout constraints.",
+                        severity: "CRITICAL"
+                    });
+                }
+            }
+            
+            // Re-evaluate overall status if it was FAIL solely due to features/aesthetics we just passed or failed
+            const anyRemainingFeatureFail = aiData.feature_results.some(res => res.status === 'FAIL');
+            const anyAestheticFail = (aiData.aesthetic_results || []).some(res => res.status === 'FAIL');
+            if (anyRemainingFeatureFail || anyAestheticFail) {
+                aiData.overall_status = 'FAIL';
+            } else {
+                aiData.overall_status = 'PASS';
+            }
+        }
 
         // 1. Strict Filter: only include features defined in the config (staticFeatures)
         if (Array.isArray(staticFeatures) && staticFeatures.length > 0) {
@@ -590,13 +749,32 @@ class AIEngine {
 
             aiData.feature_results.forEach(f => {
                 const isCardFeature = cardLevelFeatures.includes(f.feature);
-                // If it failed because it was absent, but it's a card feature on an empty widget, force PASS
-                if (f.status === "FAIL" && f.ui_status === "Absent" && isCardFeature) {
-                    f.status = "PASS (Empty State)";
-                    f.issue = "No visual defects detected (Empty State Pass)";
-                    f.remarks = "Feature is absent because the widget contains zero reviews. This is expected behavior.";
+                if (isCardFeature) {
+                    f.status = "FAIL";
+                    f.ui_status = "Absent";
+                    f.issue = "Empty State: The widget contains zero review items.";
+                    f.remarks = "Feature is absent because the widget contains zero reviews. Empty state is treated as FAIL.";
                 }
             });
+
+            if (aiData.aesthetic_results) {
+                const emptyStateAestheticCats = [
+                    "A. LAYOUT & SPACING",
+                    "C. CONTENT & TEXT RENDERING",
+                    "D. AVATAR RENDERING",
+                    "E. MEDIA & IMAGES",
+                    "G. POPUPS & MODALS"
+                ];
+                aiData.aesthetic_results.forEach(res => {
+                    const normCat = res.category.toUpperCase();
+                    const isTargetCat = emptyStateAestheticCats.some(cat => normCat.includes(cat.toUpperCase()));
+                    if (isTargetCat) {
+                        res.status = 'FAIL';
+                        res.issue = 'Empty State: No review cards are visible or rendered.';
+                        res.severity = 'CRITICAL';
+                    }
+                });
+            }
         }
 
         // 🛡️ TOTAL TRUTH OVERRIDE: Synchronize mathematical defects ONLY for confirmed FAILURES
@@ -605,7 +783,7 @@ class AIEngine {
                 (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') ||
                     msg.includes('PARTIAL') || msg.includes('CUT')) &&
                 !msg.includes('SYMMETRY_SIGNAL') &&
-                !msg.includes('EMPTY_STATE_FORCE_PASS') // Never force FAIL based on empty state
+                !msg.includes('EMPTY_STATE_FORCE_FAIL') // Never force FAIL based on empty state
             );
 
             if (clinicalDefects.length > 0) {

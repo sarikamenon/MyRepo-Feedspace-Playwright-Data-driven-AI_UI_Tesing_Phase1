@@ -33,7 +33,13 @@ class PromptBuilder {
         const configKey = featureMap[featureName];
         if (!configKey) return false;
         const keys = Array.isArray(configKey) ? configKey : [configKey];
-        const lookupContexts = [config, config.widget_customization, config.configurations, config.data, config.widget_data].filter(Boolean);
+        const lookupContexts = [
+          config.widget_customization,
+          config.configurations,
+          config.widget_data,
+          config.data,
+          config
+        ].filter(Boolean);
         return keys.some(key => lookupContexts.some(ctx => key in ctx));
       }));
 
@@ -44,15 +50,24 @@ class PromptBuilder {
 
         if (configKey) {
           const keys = Array.isArray(configKey) ? configKey : [configKey];
-          const lookupContexts = [config, config.widget_customization, config.configurations, config.data, config.widget_data, config.data?.widget_customization].filter(Boolean);
+          const lookupContexts = [
+            config.widget_customization,
+            config.data?.widget_customization,
+            config.configurations,
+            config.widget_data,
+            config.data,
+            config
+          ].filter(Boolean);
           const keyExists = keys.some(key => lookupContexts.some(ctx => key in ctx));
 
           if (keyExists) {
             const isEnabled = keys.some(key => {
-              return lookupContexts.some(ctx => {
-                const val = ctx[key];
+              const activeCtx = lookupContexts.find(ctx => key in ctx);
+              if (activeCtx) {
+                const val = activeCtx[key];
                 return val === "1" || val === 1 || val === true || val === "true";
-              });
+              }
+              return false;
             });
             const isInverted = invertedFeatures[featureName];
             expected = isInverted
@@ -133,16 +148,20 @@ ${sensoryTruth}
 🚨 RULE 0: EXISTENCE & COMPLETENESS LOCK (PRIMARY MANDATE)
 ============================================================
 1. **WIDGET DETECTION**: Can you see a COMPLETE Feedspace widget (Stars, Logo, Review Cards)? 
-2. **EMPTY_STATE_FORCE_PASS MANDATE (NON-NEGOTIABLE)**: If Section -1 contains **EMPTY_STATE_FORCE_PASS**, you MUST:
-   - Report UI Status: **Visible**.
-   - Mark ALL feature categories as **PASS (Empty State)**.
-   - Mark ALL aesthetic categories (A-G) as **PASS**.
+2. **EMPTY_STATE_FORCE_FAIL MANDATE (NON-NEGOTIABLE)**: If Section -1 contains **EMPTY_STATE_FORCE_FAIL**, you MUST:
+   - Report UI Status: **Absent**.
+   - Mark ALL feature categories as **FAIL**.
+   - Mark ALL aesthetic categories (A-G) as **FAIL**.
    - **HALLUCINATION BLOCK**: You are FORBIDDEN from reporting "Rightmost card chopped" or "Narrow card". Circular buttons (Arrows) are Navigation tools, NOT review cards. They are ALLOWED to be partially clipped by boundaries.
 3. **THE SLIVER-FAIL**: If the widget is "partially cut" (e.g., only a corner, a top sliver, or a fragmented edge is visible), you MUST report UI Status: **Absent** and Verdict: **FAIL**.
-3. **THE COMPLETE PERIMETER LOCKDOWN (FLOATING ASSETS)**: You are FORBIDDEN from reporting UI Status: **Visible** or Verdict: **PASS** for any floating element (Toast, Popup, Tooltip, Avatar-Group Card) unless you can provide a **Physical Description** of its bottom-most boundary:
+4. **SLIDER_NO_NAVIGATION_REQUIRED MANDATE**: If Section -1 contains **SLIDER_NO_NAVIGATION_REQUIRED**, you MUST:
+    - Report UI Status for **Left & Right Buttons**, **Left & Right Shift Buttons**, and **Slider Indicators** as **Absent** (if they are not visible in the pixels) or **Visible** (if you see them).
+    - Mark their Verdict / Status as **PASS** in either case.
+4.a **NAVIGATION CONTROLS BOUNDARY MANDATE**: If Section -1 contains **DOM_TRUTH_ARROWS_ABSENT** or **DOM_TRUTH_ARROWS_CLIPPED**, you MUST report UI Status for **Left & Right Buttons** and **Left & Right Shift Buttons** as **Absent**. If it contains **DOM_TRUTH_INDICATORS_ABSENT** or **DOM_TRUTH_INDICATORS_CLIPPED**, you MUST report UI Status for **Slider Indicators** as **Absent**. These elements are absent or visually clipped/truncated inside the Feedspace widget container, so any visible controls in the screenshot belong to another widget on the webpage and must be ignored.
+5. **THE COMPLETE PERIMETER LOCKDOWN (FLOATING ASSETS)**: You are FORBIDDEN from reporting UI Status: **Visible** or Verdict: **PASS** for any floating element (Toast, Popup, Tooltip, Avatar-Group Card) unless you can provide a **Physical Description** of its bottom-most boundary:
    - **Mandatory Logic**: "I can see the complete [Color] bottom boundary (Border/Shadow) and [Rounded/Sharp] corners. Below this border, I see ~10px of [Background Color] whitespace."
    - **THE BACKGROUND-AIR TEST**: If the card border is the very last thing in the image (no whitespace below it), or if it 'bleeds' into the page edge, you MUST trigger **FAIL_LAYOUT_CLIPPED**. (Exception: Navigation Arrows are exempt).
-4. **RULE 19: THE PERIMETER CLEARANCE MANDATE (Text & Ratings)**: Specifically audit the last visible line of content on every review card (Descenders OR Stars).
+6. **RULE 19: THE PERIMETER CLEARANCE MANDATE (Text & Ratings)**: Specifically audit the last visible line of content on every review card (Descenders OR Stars).
    - **THE GUTTER CHECK**: You MUST zoom your attention to the **BOTTOM EDGE** of the physical card border.
    - **FLEX-STRETCH EXCEPTION (ANTI-HALLUCINATION)**: If a card is vertically stretched (due to another card in the row expanding), there will be a large amount of empty whitespace at the bottom. You are **PROHIBITED** from reporting "SQUEEZED-FAIL" for these cards. Measure distance from the text to the absolute bottom border of the card, NOT to an imaginary internal container.
    - **RASTER PROOF (AUTO-FAIL)**: You are FORBIDDEN from reporting a PASS for layout unless you can state the **Pixel Gutter Count** (e.g., "There are ~8px of white space below the stars").

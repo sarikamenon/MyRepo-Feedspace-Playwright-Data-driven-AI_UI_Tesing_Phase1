@@ -161,6 +161,106 @@ async function run() {
 
         console.log(`\n[${i + 1}/${dailyBatch.length}] Processing: ${url}`);
 
+        // --- PREVALIDATION: URL Reachability Check ---
+        console.log(`   > [Prevalidation] Checking reachability for: ${url}`);
+        const reachability = await PlaywrightHelper.checkReachability(url, 3, widgetUUID);
+
+        if (reachability.status === 'EMPTY_WIDGET') {
+            console.log(`   > [Prevalidation] 🛑 Skipped (Empty State Fail): The widget has zero active feeds/reviews.`);
+            results.push({
+                url: url,
+                widgetId: widgetUUID,
+                widgetType: typeName,
+                status: 'FAIL',
+                error: 'Empty State: The widget contains zero active feeds/reviews',
+                timestamp: new Date().toISOString(),
+                aiAnalysis: {
+                    overall_status: 'FAIL',
+                    analysis_message: `Prevalidation Failure: The widget contains zero active reviews/feeds (Empty State).`,
+                    feature_results: [
+                        {
+                            feature: "Widget Type Identification",
+                            ui_status: typeName,
+                            config_status: typeName,
+                            issue: "Widget confirmed empty during prevalidation",
+                            status: "PASS"
+                        },
+                        {
+                            feature: "Show Review Date",
+                            ui_status: "Absent",
+                            config_status: "Visible",
+                            issue: "Empty State: The widget contains zero review items.",
+                            remarks: "Feature is absent because the widget contains zero reviews.",
+                            status: "FAIL"
+                        },
+                        {
+                            feature: "Show Review Ratings",
+                            ui_status: "Absent",
+                            config_status: "Visible",
+                            issue: "Empty State: The widget contains zero review items.",
+                            remarks: "Feature is absent because the widget contains zero reviews.",
+                            status: "FAIL"
+                        },
+                        {
+                            feature: "Read More",
+                            ui_status: "Absent",
+                            config_status: "Visible",
+                            issue: "Empty State: The widget contains zero review items.",
+                            remarks: "Feature is absent because the widget contains zero reviews.",
+                            status: "FAIL"
+                        },
+                        {
+                            feature: "Show Social Platform Icon",
+                            ui_status: "Absent",
+                            config_status: "Visible",
+                            issue: "Empty State: The widget contains zero review items.",
+                            remarks: "Feature is absent because the widget contains zero reviews.",
+                            status: "FAIL"
+                        },
+                        {
+                            feature: "Feedspace Branding",
+                            ui_status: "Visible",
+                            config_status: "Visible",
+                            issue: "No visual defects detected",
+                            remarks: "Feedspace branding is present on the widget embed by default.",
+                            status: "PASS"
+                        }
+                    ],
+                    aesthetic_results: [
+                        { category: "A. LAYOUT & SPACING", issue: "Empty State: No review cards are visible or rendered.", severity: "CRITICAL", status: "FAIL" },
+                        { category: "B. ELEMENT CONTAINMENT", issue: "No visual defects detected (Empty State Pass)", severity: "N/A", status: "PASS" },
+                        { category: "C. CONTENT & TEXT RENDERING", issue: "Empty State: No review cards are visible or rendered.", severity: "CRITICAL", status: "FAIL" },
+                        { category: "D. AVATAR RENDERING", issue: "Empty State: No review cards are visible or rendered.", severity: "CRITICAL", status: "FAIL" },
+                        { category: "E. MEDIA & IMAGES", issue: "Empty State: No review cards are visible or rendered.", severity: "CRITICAL", status: "FAIL" },
+                        { category: "F. THEME & COLOR VISIBILITY", issue: "No visual defects detected (Empty State Pass)", severity: "N/A", status: "PASS" },
+                        { category: "G. POPUPS & MODALS", issue: "Empty State: No review cards are visible or rendered.", severity: "CRITICAL", status: "FAIL" }
+                    ]
+                }
+            });
+            saveProcessedUrl(url); // Mark as processed to rotate out of pool
+            continue; // Skip Playwright execution loop
+        }
+
+        if (reachability.status !== 'REACHABLE') {
+            console.error(`   > [Prevalidation] 🛑 Skipped: URL is ${reachability.status}. Reason: ${reachability.message}`);
+            results.push({
+                url: url,
+                widgetId: widgetUUID,
+                widgetType: typeName,
+                status: reachability.status,
+                error: reachability.message,
+                timestamp: new Date().toISOString(),
+                aiAnalysis: {
+                    overall_status: 'FAIL',
+                    analysis_message: `Prevalidation Failure: The URL could not be reached or accessed. Status: ${reachability.status}, Error Code: ${reachability.error_code || 'N/A'}, Message: ${reachability.message}`,
+                    feature_results: []
+                }
+            });
+            saveProcessedUrl(url); // Mark as processed to rotate out of pool
+            continue; // Skip standard loop
+        }
+        console.log(`   > [Prevalidation] ✅ URL is reachable. Initiating validation.`);
+
         let success = false;
         let attempt = 0;
         const maxAttempts = 3;
