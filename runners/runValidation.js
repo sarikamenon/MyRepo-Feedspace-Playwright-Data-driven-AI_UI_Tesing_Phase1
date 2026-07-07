@@ -300,7 +300,7 @@ async function run() {
                 }
 
                 // 3. Initialize & Navigate (Handling Hiding, Scrolling, etc.)
-                await helper.init(url, typeId, configuration);
+                await helper.init(url, typeId, configuration, widgetUUID);
 
                 // 4. Run AI Analysis
                 const validationResult = await helper.validateWithAI(staticFeatures);

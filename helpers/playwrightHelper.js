@@ -266,8 +266,9 @@ class PlaywrightHelper {
      *     Set.has() call — this handles backend/frontend alias equivalence
      *     (e.g. "MARQUEE_STRIPE" === "STRIP_SLIDER").
      */
-    async init(url, widgetTypeId, config) {
+    async init(url, widgetTypeId, config, widgetUUID = null) {
         this.config = config || {};
+        this.widgetUUID = widgetUUID || this.config.unique_widget_id || this.config.widgetId || this.config.id || null;
 
         // Resolve expectedType from whatever the caller passes:
         // widgetTypeId may be a numeric ID (e.g. 5) or a string name (e.g. "masonry")
@@ -503,13 +504,20 @@ class PlaywrightHelper {
             const networkHit = this.detectedNetworkTypes.size > 0;
 
             // Check DOM state - must be actual script or an initialized widget container (having shadowRoot or children)
-            const scriptTag = await this.page.evaluate(() => {
-                const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
-                const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
-                    return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
-                });
-                return hasScript || hasInitializedWidget;
-            }).catch(() => false);
+            let scriptTag = false;
+            for (const frame of this.page.frames()) {
+                const hasTag = await frame.evaluate(() => {
+                    const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
+                    const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
+                        return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
+                    });
+                    return hasScript || hasInitializedWidget;
+                }).catch(() => false);
+                if (hasTag) {
+                    scriptTag = true;
+                    break;
+                }
+            }
 
             if (networkHit || scriptTag) {
                 console.log(`[PlaywrightHelper] Feedspace signature detected (${networkHit ? 'Network' : 'DOM'}).`);
@@ -617,14 +625,16 @@ class PlaywrightHelper {
 
         try {
             // ── STEP 1: Wait for any widget marker ───────────────────────────
-            await this.page.waitForSelector(SELECTOR_STRING, {
-                state: 'attached',
-                timeout: 45000
-            }).catch(() => {
-                console.warn('[PlaywrightHelper] Timeout waiting for widget selector.');
-            });
+            let locatorFrame = this.page;
 
-            const allMatches = this.page.locator(SELECTOR_STRING);
+            // Wait for selector in any frame
+            const foundFrame = await this._waitForSelectorInAnyFrame(SELECTOR_STRING, 45000);
+            if (foundFrame) {
+                locatorFrame = foundFrame;
+                console.log(`[PlaywrightHelper] Found active frame containing widget.`);
+            }
+
+            const allMatches = locatorFrame.locator(SELECTOR_STRING);
             const count = await allMatches.count();
 
             if (count === 0) {
@@ -646,7 +656,7 @@ class PlaywrightHelper {
             console.log(`[PlaywrightHelper] Found ${count} candidate(s)`);
 
             // ── STEP 2: Shadow DOM pierce scan ───────────────────────────────
-            const candidatesFound = await this.page.evaluate((selString) => {
+            const candidatesFound = await locatorFrame.evaluate((selString) => {
                 const results = [];
                 const visited = new Set();
                 const pierceShadow = (root) => {
@@ -717,9 +727,18 @@ class PlaywrightHelper {
                     ? `[data-fs-temp-id="${cInfo.id}"]`
                     : `[id="${cInfo.id}"], [unique_widget_id="${cInfo.id}"], [data-id="${cInfo.id}"], [data-widget-type="${cInfo.id}"]`;
 
-                const candLocator = selector ? this.page.locator(selector).first() : null;
+                const candLocator = selector ? locatorFrame.locator(selector).first() : null;
 
                 if (candLocator) {
+                    // Direct UUID match bypasses discovery checks
+                    const isUuidMatch = this.widgetUUID && (cInfo.id === this.widgetUUID || cInfo.uniqueWidgetIdAttr === this.widgetUUID);
+                    if (isUuidMatch) {
+                        locator = candLocator;
+                        detectedType = this.expectedType;
+                        console.log(`[PlaywrightHelper] 🎯 Exact Widget UUID Match: Found container matching targeted UUID ${this.widgetUUID}`);
+                        break;
+                    }
+
                     const discovered = await WidgetDetector.discover(candLocator, this.networkWidgetMap);
                     if (discovered !== 'Unknown') {
                         const isMatch = WidgetDetector.isSameType(discovered, this.expectedType);
@@ -968,7 +987,7 @@ class PlaywrightHelper {
                 }
 
                 // Header-Aware Scrolling: Ensures the widget isn't hidden by sticky nav bars
-                await this._scrollToWidget(locator);
+                await this._scrollToWidget(locator, locatorFrame);
                 await this._sleep(1500);
             }
             await this._sleep(500);
@@ -979,6 +998,36 @@ class PlaywrightHelper {
             // This detects presence of elements buried in Shadow DOM to prevent AI hallucination and background interference.
             let domTruth = { iconsFound: false, starsFound: false, itemCount: 0 };
             if (locator) {
+                // 🛰️ FLOATING_TOAST PRE-WAIT: Toast cards are body-level fixed overlays animated in
+                // after a delay. Wait up to 6s for the portrait elements to exist in DOM.
+                // NOTE: We check DOM EXISTENCE (not visibility) — the parent container may be
+                // opacity:0 until the entrance animation fires. FloatingToastHelper handles visible cycling.
+                if (normalizedType === 'FLOATING_TOAST') {
+                    console.log('[PlaywrightHelper] ⏳ FLOATING_TOAST: Waiting up to 6s for body-level toast elements in DOM...');
+                    const floatingAppearSels = [
+                        '.feedspace-portrait', '[data-avatar-name]',
+                        '.feedspace-toast', '.fe-toast-card', '.fe-floating-preview',
+                        '.fe-floating-toast', '.fe-shadow-container'
+                    ];
+                    let toastAppeared = false;
+                    for (let tw = 0; tw < 3 && !toastAppeared; tw++) {
+                        await this._sleep(2000);
+                        toastAppeared = await this.page.evaluate((sels) => {
+                            // Check existence only — parent may be hidden during animation
+                            for (const sel of sels) {
+                                if (document.querySelectorAll(sel).length > 0) return true;
+                            }
+                            return false;
+                        }, floatingAppearSels).catch(() => false);
+                        if (toastAppeared) {
+                            console.log(`[PlaywrightHelper] ✅ FLOATING_TOAST: Elements found in DOM after ${(tw + 1) * 2}s.`);
+                        }
+                    }
+                    if (!toastAppeared) {
+                        console.warn('[PlaywrightHelper] ⚠️ FLOATING_TOAST: Elements not found in DOM within 6s. Proceeding anyway.');
+                    }
+                }
+
                 // 🛰️ CONTENT POLLING LOOP (Harden against Race Conditions)
                 // If we found the container but 0 items, we poll up to 5 times (10s total) 
                 // to give the widget content time to surface in the DOM.
@@ -987,6 +1036,7 @@ class PlaywrightHelper {
 
                 while (pollAttempts < maxPolls) {
                     pollAttempts++;
+
                     domTruth = await locator.evaluate(el => {
                         const iconSels = [
                             '.feedspace-d6-header-icon', '.feedspace-element-header-icon',
@@ -1036,12 +1086,37 @@ class PlaywrightHelper {
 
                         // FIX: Only call countDeep once on the root or its shadow.
                         // Recursive logic handles the rest correctly.
-                        const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
+                        const brandingSels = [
+                             '.feedspace-branding-footer-link', '.feedspace-branding',
+                             '.feedspace-branding-pill', '[class*="branding-footer"]',
+                             '[class*="feedspace-branding"]'
+                         ];
                         const context = el.shadowRoot || el;
                         const iconsFound = findDeep(context, iconSels);
                         const starsFound = findDeep(context, starSels);
                         const brandingFound = findDeep(context, brandingSels) || !!document.querySelector(brandingSels.join(', '));
-                        const itemCount = countDeep(context, itemSels);
+                        let itemCount = countDeep(context, itemSels);
+
+                        // FLOATING_TOAST FALLBACK: Toast cards are appended directly to <body> as fixed overlays,
+                        // not inside the feedspace-embed container. If we find zero items inside the
+                        // container, scan the full document for toast-specific markers (existence only —
+                        // parent container may be opacity:0 during animation cycle).
+                        if (itemCount === 0) {
+                            const floatingToastDocSels = [
+                                '.feedspace-portrait', '[data-avatar-name]',
+                                '.feedspace-widget-close', '.feedspace-toast',
+                                '.fe-toast-card', '.fe-floating-toast', '.fe-floating-preview',
+                                '.fe-shadow-container', '.fe-chat-bubble', '.fe-bubble-launcher'
+                            ];
+                            for (const sel of floatingToastDocSels) {
+                                const found = document.querySelectorAll(sel);
+                                // Check existence only — visibility handled by FloatingToastHelper
+                                if (found.length > 0) {
+                                    itemCount = found.length;
+                                    break;
+                                }
+                            }
+                        }
 
                         return { iconsFound, starsFound, brandingFound, itemCount };
                     }).catch(() => ({ iconsFound: false, starsFound: false, brandingFound: false, itemCount: 0 }));
@@ -1060,6 +1135,22 @@ class PlaywrightHelper {
                     (this.config.widget_data && Array.isArray(this.config.widget_data.feeds_data) && this.config.widget_data.feeds_data.length === 0)
                 );
 
+                // GENERAL API BYPASS: If DOM sniffing returns 0 items, but the network-intercepted
+                // API config confirms that feeds exist in the database, we bypass the DOM empty-state gate.
+                // This prevents false positives due to rendering delays, iframe isolation, or modified class names,
+                // while letting the visual audit confirm whether the widget actually renders.
+                if (domTruth.itemCount === 0) {
+                    const apiFeeds = this.config?.widget_data?.feeds;
+                    const apiFeedsData = this.config?.widget_data?.feeds_data;
+                    const confirmedFeedCount = Array.isArray(apiFeeds) ? apiFeeds.length
+                        : Array.isArray(apiFeedsData) ? apiFeedsData.length : -1;
+                    if (confirmedFeedCount > 0) {
+                        console.log(`[PlaywrightHelper] ✅ API confirms ${confirmedFeedCount} feeds. Bypassing DOM empty-state gate for ${normalizedType} (DOM sniffing counted 0 items).`);
+                        domTruth.itemCount = confirmedFeedCount;
+                    }
+                }
+
+
                 if (domTruth.itemCount === 0 || hasZeroFeeds) {
                     const reason = 'Empty State: The widget contains zero visible/active reviews on the frontend';
                     console.warn(`[PlaywrightHelper] 🛰️  DOM Sniff: EMPTY STATE CONFIRMED. ${reason}`);
@@ -1076,6 +1167,9 @@ class PlaywrightHelper {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Found ${domTruth.itemCount} item(s) after ${pollAttempts} poll(s).`);
                 }
 
+                // Wait for layout, slider initialization, and dynamic styles to settle before sniffing elements/boundaries
+                await this._sleep(1500);
+
                 let isBrandingClipped = false;
                 let isCardClipped = false;
 
@@ -1086,7 +1180,11 @@ class PlaywrightHelper {
                                 const rect = elem.getBoundingClientRect();
                                 if (rect.width === 0 || rect.height === 0) return true;
 
-                                let parent = elem.parentElement;
+                                // Ignore internal widget overflow: hidden. Start parent traversal from
+                                // outside (above) the outer Feedspace embed wrapper container.
+                                const embedContainer = elem.closest('.feedspace-embed, [data-fs-target-widget="true"]');
+                                let parent = embedContainer ? embedContainer.parentElement : elem.parentElement;
+
                                 while (parent) {
                                     const style = window.getComputedStyle(parent);
                                     const hasVerticalOverflow = style.overflow === 'hidden' || style.overflowY === 'hidden';
@@ -1100,7 +1198,13 @@ class PlaywrightHelper {
                                 return false;
                             };
 
-                            const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
+
+                            const brandingSels = [
+                             '.feedspace-branding-footer-link', '.feedspace-branding',
+                             '.feedspace-branding-pill', '[class*="branding-footer"]',
+                             '[class*="feedspace-branding"]'
+                         ];
+
                             const findBranding = (root) => {
                                 const list = [];
                                 for (const sel of brandingSels) {
@@ -1302,7 +1406,7 @@ class PlaywrightHelper {
                     const readMoreStatus = await locator.evaluate(el => {
                         const findReadMore = (root) => {
                             const buttons = Array.from(root.querySelectorAll('button, a, span')).filter(btn => {
-                                return /Read More/i.test(btn.innerText || btn.textContent);
+                                return /Read More|Read Less/i.test(btn.innerText || btn.textContent);
                             });
                             const children = Array.from(root.querySelectorAll('*'));
                             for (const child of children) {
@@ -1331,7 +1435,36 @@ class PlaywrightHelper {
             }
 
             // Isolate Feedspace widget from page background/interfering widgets
-            await this._isolateWidget();
+            if (locator) {
+                await locator.evaluate(el => {
+                    el.setAttribute('data-fs-target-widget', 'true');
+                }).catch(() => {});
+
+                // Recursive Frame Marking: Walk all the way up the parent frame tree and mark
+                // every frame element as kept so page isolation doesn't hide any ancestor frames.
+                let currentFrame = locatorFrame;
+                while (currentFrame && currentFrame !== this.page.mainFrame()) {
+                    const frameElementHandle = await currentFrame.frameElement().catch(() => null);
+                    if (frameElementHandle) {
+                        await frameElementHandle.evaluate(el => {
+                            el.setAttribute('data-fs-keep-iframe', 'true');
+                        }).catch(() => {});
+                    }
+                    currentFrame = currentFrame.parentFrame();
+                }
+            }
+
+            // FLOATING_TOAST: Skip widget isolation entirely.
+            // The floating toast renders body-level fixed overlays outside the feedspace-embed container.
+            // Running _isolateWidget() would hide these overlays (they are not children of the target container),
+            // resulting in blank white screenshots. FloatingToastHelper captures its own focused clip shots.
+            if (normalizedType !== 'FLOATING_TOAST') {
+                await this._isolateWidget();
+            } else {
+                console.log('[PlaywrightHelper] ⏭️  FLOATING_TOAST: Skipping page isolation (body-level overlay widget).');
+            }
+
+
 
             // ── STEP 6: Widget-specific interaction ──────────────────────────
             const box = locator ? await locator.boundingBox().catch(() => null) : null;
@@ -1343,14 +1476,31 @@ class PlaywrightHelper {
 
             let interactionContext = this.page;
             if (locator) {
-                const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
-                if (tagName === 'iframe') {
-                    const frame = await locator.contentFrame();
-                    if (frame) {
-                        interactionContext = frame;
-                        console.log('[PlaywrightHelper] Widget is inside iframe — switching context.');
+                if (locatorFrame !== this.page.mainFrame()) {
+                    interactionContext = locatorFrame;
+                    console.log('[PlaywrightHelper] Widget is inside iframe — switching context.');
+                } else {
+                    const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+                    if (tagName === 'iframe') {
+                        const contentFrame = await locator.contentFrame();
+                        if (contentFrame) {
+                            interactionContext = contentFrame;
+                            console.log('[PlaywrightHelper] Widget is iframe — switching context.');
+                        }
                     }
                 }
+            }
+
+            // Patch interactionContext if it is a Frame and doesn't have a screenshot method
+            if (interactionContext && typeof interactionContext.screenshot !== 'function') {
+                const self = this;
+                interactionContext.screenshot = async function (options = {}) {
+                    const frameElement = await this.frameElement();
+                    if (frameElement) {
+                        return await frameElement.screenshot(options).catch(() => null);
+                    }
+                    return await self.page.screenshot(options).catch(() => null);
+                };
             }
 
             // ── STEP 6.5: Pagination Handling (Context Aware Storyboard) ─────
@@ -1443,7 +1593,7 @@ class PlaywrightHelper {
             // ── STEP 7.5: Branding-Specific Capture (Prevent Clipping) ──────
             if (domTruth.brandingFound) {
                 const brandingSels = ['.feedspace-branding-footer-link', '.feedspace-branding', '[class*="branding-footer"]'];
-                const branding = this.page.locator(brandingSels.join(', ')).filter({ visible: true }).first();
+                const branding = interactionContext.locator(brandingSels.join(', ')).filter({ visible: true }).first();
                 if (await branding.isVisible().catch(() => false)) {
                     const brandingShot = await branding.screenshot({ animations: 'disabled' }).catch(() => null);
                     if (brandingShot) {
@@ -1634,21 +1784,59 @@ class PlaywrightHelper {
     }
 
     /**
-     * Hides all elements on the page except the Feedspace containers and their ancestors/descendants.
+     * Hides all elements on the page except the targeted Feedspace container and its ancestors/descendants.
      */
     async _isolateWidget() {
         try {
-            console.log('[PlaywrightHelper] 🛡️  Isolating Feedspace widget: hiding other page elements to prevent background interference.');
+            console.log('[PlaywrightHelper] 🛡️  Isolating target Feedspace widget: hiding other page elements & sibling widgets.');
             await this.page.evaluate((selString) => {
                 const keep = new Set();
 
-                const pierceFind = (root) => {
-                    root.querySelectorAll(selString).forEach(target => {
-                        let curr = target;
+                // Keep any marked iframe elements and their ancestors
+                document.querySelectorAll('[data-fs-keep-iframe="true"]').forEach(iframe => {
+                    let curr = iframe;
+                    while (curr) {
+                        keep.add(curr);
+                        curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
+                    }
+                });
+
+                // GENERAL OVERLAY PROTECTION: Keep standard modal, tooltip, and popup elements (often appended directly to <body>)
+                // for all widgets so that page isolation doesn't hide overlays during clicks/interactions.
+                const overlaySels = [
+                    '.fe-review-box', '.fe-modal-content', '[class*="review-box"]', '.feedspace-expanded-review',
+                    '.fs-modal-overlay', '.fs-modal-inner', '.fs-modal-content', '.feedspace-review-card',
+                    '.feedspace-avatar-tooltip', '[class*="tooltip"]', '.fe-tooltip',
+                    '.feedspace-toast', '.fe-toast-card', '.fe-floating-preview', '.fe-floating-toast',
+                    '.fe-shadow-container', '.fe-chat-bubble', '.fe-bubble-launcher',
+                    '.feedspace-portrait', '[data-avatar-name]', '.feedspace-widget-close'
+                ];
+                overlaySels.forEach(sel => {
+                    document.querySelectorAll(sel).forEach(el => {
+                        let curr = el;
                         while (curr) {
                             keep.add(curr);
                             curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
                         }
+                    });
+                });
+
+                // Find targeted widget, falling back to all matching selectors if no target marked
+                const targetWidgets = document.querySelectorAll('[data-fs-target-widget="true"]');
+                const targets = targetWidgets.length > 0 ? targetWidgets : document.querySelectorAll(selString);
+
+                const pierceFind = (root) => {
+                    targets.forEach(target => {
+                        // Check if the target is within the current root subtree
+                        if (root.contains && !root.contains(target)) return;
+                        
+                        let curr = target;
+                        while (curr && curr !== root) {
+                            keep.add(curr);
+                            curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
+                        }
+                        if (curr) keep.add(curr); // Add root if we reached it
+                        
                         const children = target.querySelectorAll('*');
                         children.forEach(c => {
                             keep.add(c);
@@ -1700,6 +1888,16 @@ class PlaywrightHelper {
                 hidden.forEach(el => {
                     el.style.display = el.dataset.fsOriginalDisplay === 'block' ? '' : el.dataset.fsOriginalDisplay;
                     el.removeAttribute('data-fs-original-display');
+                });
+
+                // Clean up any data-fs-keep-iframe attributes
+                document.querySelectorAll('[data-fs-keep-iframe]').forEach(el => {
+                    el.removeAttribute('data-fs-keep-iframe');
+                });
+
+                // Clean up any data-fs-target-widget attributes
+                document.querySelectorAll('[data-fs-target-widget]').forEach(el => {
+                    el.removeAttribute('data-fs-target-widget');
                 });
             }).catch(e => console.warn('[PlaywrightHelper] Restore evaluation failed:', e.message));
         } catch (e) {
@@ -1932,9 +2130,27 @@ class PlaywrightHelper {
     /**
      * Header-Aware scroll to ensure widget is visible and not covered by sticky headers.
      */
-    async _scrollToWidget(locator) {
+    async _scrollToWidget(locator, frame) {
         if (!locator) return;
         try {
+            const targetFrame = frame || this.page;
+            if (targetFrame !== this.page.mainFrame()) {
+                const frameElementHandle = await targetFrame.frameElement();
+                if (frameElementHandle) {
+                    await this.page.evaluate(([iframeEl, headerOffset]) => {
+                        const rect = iframeEl.getBoundingClientRect();
+                        const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+                        const targetY = currentScroll + rect.top - headerOffset;
+                        window.scrollTo({
+                            top: Math.max(0, targetY),
+                            behavior: 'auto'
+                        });
+                    }, [frameElementHandle, 100]); // 100px offset for header
+                    console.log('[PlaywrightHelper] Scrolled subframe container into view with header offset.');
+                    return;
+                }
+            }
+
             await locator.evaluate((el) => {
                 // 1. Calculate Header Height
                 const headerHeight = Array.from(document.querySelectorAll('*'))
@@ -2012,12 +2228,40 @@ class PlaywrightHelper {
         return new Promise(r => setTimeout(r, ms));
     }
 
+    async _waitForSelectorInAnyFrame(selector, timeout = 45000) {
+        const startTime = Date.now();
+        while (Date.now() - startTime < timeout) {
+            if (this.page.isClosed()) return null;
+            for (const frame of this.page.frames()) {
+                try {
+                    const count = await frame.locator(selector).count();
+                    if (count > 0) {
+                        return frame;
+                    }
+                } catch (e) { }
+            }
+            await this._sleep(1000);
+        }
+        return null;
+    }
+
     /**
      * Safe Screenshot Wrapper: Prevents 400 API errors by capping dimensions.
      */
     async _safeScreenshot(target, options = {}) {
         try {
             if (!target || this.page.isClosed()) return null;
+
+            // Handle Frame target by delegating to its frameElement
+            const isFrame = typeof target.screenshot === 'function' && typeof target.page === 'function' && typeof target.boundingBox !== 'function';
+            if (isFrame) {
+                const frameElement = await target.frameElement();
+                if (frameElement) {
+                    return await this._safeScreenshot(frameElement, options);
+                } else {
+                    return await this._safeScreenshot(this.page, options);
+                }
+            }
 
             const isPage = target === this.page;
             let height = 0;

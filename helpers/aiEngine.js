@@ -265,7 +265,7 @@ class AIEngine {
                 const isBranding = res.feature === "Feedspace Branding";
                 const isReadMore = res.feature === "Read More";
 
-                if (isArrow && arrowsAbsent) {
+                if (isArrow && arrowsAbsent && res.ui_status !== 'Visible') {
                     const isClipped = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_ARROWS_CLIPPED'));
                     res.ui_status = 'Absent';
                     res.status = noNavigationRequired ? 'PASS' : ((res.config_status === 'Visible') ? 'FAIL' : 'PASS');
@@ -281,7 +281,7 @@ class AIEngine {
                         : 'Slider navigation arrows/buttons are absent, which is permitted because the review count is 4 or fewer.';
                 }
 
-                if (isIndicator && indicatorsAbsent) {
+                if (isIndicator && indicatorsAbsent && res.ui_status !== 'Visible') {
                     const isClipped = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_INDICATORS_CLIPPED'));
                     res.ui_status = 'Absent';
                     res.status = noNavigationRequired ? 'PASS' : ((res.config_status === 'Visible') ? 'FAIL' : 'PASS');
@@ -297,7 +297,7 @@ class AIEngine {
                         : 'Slider indicators (dots/pagination) are absent, which is permitted because the review count is 4 or fewer.';
                 }
 
-                if (isBranding && brandingAbsent) {
+                if (isBranding && brandingAbsent && res.ui_status !== 'Visible') {
                     res.ui_status = 'Absent';
                     res.status = (res.config_status === 'Visible') ? 'FAIL' : 'PASS';
                     res.issue = res.status === 'FAIL' 
@@ -308,7 +308,7 @@ class AIEngine {
                         : 'Feedspace branding is absent but allowed.';
                 }
 
-                if (isReadMore && readMoreNotNeeded) {
+                if (isReadMore && readMoreNotNeeded && res.ui_status !== 'Visible') {
                     res.ui_status = 'Absent';
                     res.status = 'PASS';
                     res.issue = 'No visual defects detected (Read More buttons are not needed because all reviews are short)';
@@ -533,7 +533,8 @@ class AIEngine {
         };
 
         // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
-        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "SYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
+        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "ASYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
+
         const layoutLine = findAdmission(layoutKeywords);
         const mentionsLayoutIssue = layoutLine && !analysisMessage.includes("PASS_FORCE_LAYOUT");
 
@@ -647,15 +648,22 @@ class AIEngine {
                 const aiIssue = (f.issue || "").toLowerCase() + (f.remarks || "").toLowerCase();
                 const isAbsentIssue = aiIssue.includes("absent") || aiIssue.includes("missing") || aiIssue.includes("not present") || aiIssue.includes("skeleton") || aiIssue.includes("not found");
 
-                // If it was a FAIL, we ONLY flip it to PASS if confirmed missing in data
-                // If it's a FAIL because it's VISIBLE but shouldn't be, we keep the FAIL!
-                if (f.status === "FAIL" && isAbsentIssue) {
-                    // This will be flipped inside the matchingFeed check below if hasNullData is true
-                }
-
                 // Map to the correct feed
                 // Regex improved to capture full names with spaces inside [Card: ...]
-                const cardIdentifier = (f.issue + (f.remarks || "")).match(/Card:\s*([^\]]+)/i)?.[1]?.trim() || "AN";
+                let cardIdentifier = (f.issue + (f.remarks || "")).match(/Card:\s*([^\]]+)/i)?.[1]?.trim() || "AN";
+
+                if (cardIdentifier === "AN" && analysisMessage) {
+                    // Try to scan the reasoning/preamble for any of the app_user_names
+                    for (const feed of rawFeeds) {
+                        const name = feed.app_user_name || feed.user_name || feed.name || "";
+                        if (name && (analysisMessage.toLowerCase().includes(name.toLowerCase()) || 
+                                     f.remarks?.toLowerCase().includes(name.toLowerCase()) ||
+                                     f.issue?.toLowerCase().includes(name.toLowerCase()))) {
+                            cardIdentifier = name;
+                            break;
+                        }
+                    }
+                }
 
                 let matchingFeed = rawFeeds.find(feed => {
                     const name = (feed.app_user_name || feed.user_name || feed.name || "").toString().toLowerCase();
@@ -670,13 +678,13 @@ class AIEngine {
                 // Fallback: If only one card exists, use the first feed
                 if (!matchingFeed && rawFeeds.length === 1) matchingFeed = rawFeeds[0];
 
+                const isRatingTrait = trait.includes("rating");
+                const isIconTrait = trait.includes("icon") || trait.includes("platform");
+                const isDateTrait = trait.includes("date");
+
+                let hasNullData = false;
+
                 if (matchingFeed) {
-                    const isRatingTrait = trait.includes("rating");
-                    const isIconTrait = trait.includes("icon") || trait.includes("platform");
-                    const isDateTrait = trait.includes("date");
-
-                    let hasNullData = false;
-
                     if (isRatingTrait) {
                         const ratingValue = (matchingFeed.rating !== null && matchingFeed.rating !== undefined) ? matchingFeed.rating : matchingFeed.response;
                         hasNullData = ratingValue === null ||
@@ -691,9 +699,18 @@ class AIEngine {
                         const feedType = matchingFeed.feed_type || "";
                         const isManualReview = slug.includes("manual");
                         const isVideoFeed = feedType === "video_feed";
+                        
+                        const hasSocialUrl = matchingFeed.review_url && 
+                                             matchingFeed.review_url !== "N/A" && 
+                                             (matchingFeed.review_url.includes("facebook.com") || 
+                                              matchingFeed.review_url.includes("google.com") || 
+                                              matchingFeed.review_url.includes("instagram.com") ||
+                                              matchingFeed.review_url.includes("youtube.com") ||
+                                              matchingFeed.review_url.includes("twitter.com") ||
+                                              matchingFeed.review_url.includes("yelp.com"));
 
                         hasNullData = (showIconConfig === "0") ||
-                            isManualReview ||
+                            (isManualReview && !hasSocialUrl) ||
                             isVideoFeed ||
                             (!matchingFeed.social_platform && !matchingFeed.review_url);
                     } else if (isDateTrait) {
@@ -735,6 +752,59 @@ class AIEngine {
                     } else {
                         // Data says there IS a rating, so we respect the AI's FAIL
                         console.log(`[AIEngine] DEFCON-1: Respecting FAIL for ${f.feature} (Data has non-null value)`);
+                    }
+                } else {
+                    // Fallback: If matchingFeed cannot be resolved (no names matched in AI remarks/analysis), 
+                    // check if ALL rawFeeds consistently show null data for the feature.
+                    let allNull = false;
+                    if (isRatingTrait) {
+                        allNull = rawFeeds.every(feed => {
+                            const val = (feed.rating !== null && feed.rating !== undefined) ? feed.rating : feed.response;
+                            return val === null || val === 0 || val === "0" || val === undefined || val === "";
+                        });
+                    } else if (isIconTrait) {
+                        const showIconConfig = (f.config_status === "Visible" || f.config_status?.includes("Visible")) ? "1" : "0";
+                        if (showIconConfig === "0") {
+                            allNull = true;
+                        } else {
+                            allNull = rawFeeds.every(feed => {
+                                const slug = feed.social_platform?.slug || "";
+                                const feedType = feed.feed_type || "";
+                                const isManualReview = slug.includes("manual");
+                                const isVideoFeed = feedType === "video_feed";
+                                const hasSocialUrl = feed.review_url && 
+                                                     feed.review_url !== "N/A" && 
+                                                     (feed.review_url.includes("facebook.com") || 
+                                                      feed.review_url.includes("google.com") || 
+                                                      feed.review_url.includes("instagram.com") ||
+                                                      feed.review_url.includes("youtube.com") ||
+                                                      feed.review_url.includes("twitter.com") ||
+                                                      feed.review_url.includes("yelp.com"));
+
+                                return (isManualReview && !hasSocialUrl) || isVideoFeed || (!feed.social_platform && !feed.review_url);
+                            });
+                        }
+                    } else if (isDateTrait) {
+                        allNull = rawFeeds.every(feed => !feed.review_at);
+                    }
+
+                    if (allNull) {
+                        console.log(`[AIEngine] 🕵️ RASTER TRUTH (Global Fallback): Data check confirms ${trait} should be Absent for all feeds.`);
+                        const isVisibleInUI = f.ui_status === "Visible" || f.ui_status === "Visible (Detected)" || f.ui_status?.includes("Visible");
+                        const isAbsentInConfig = f.config_status === "Absent" || f.config_status?.includes("Absent");
+
+                        if (isVisibleInUI && isAbsentInConfig) {
+                            f.status = "FAIL";
+                            f.issue = `VIOLATION: ${trait} is VISIBLE in the UI review cards, but the widget configuration is set to ABSENT.`;
+                        } else {
+                            if (isVisibleInUI) {
+                                f.ui_status = "Absent";
+                            }
+                            f.status = "PASS";
+                            if (f.issue && !f.issue.includes("SKELETON_PASS_FORCE")) {
+                                f.issue = "No visual defects detected (Global Data-Driven Pass)";
+                            }
+                        }
                     }
                 }
             }

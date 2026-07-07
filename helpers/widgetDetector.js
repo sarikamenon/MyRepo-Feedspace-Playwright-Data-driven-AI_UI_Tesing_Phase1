@@ -102,11 +102,11 @@ class WidgetDetector {
         if (typeof raw === 'string') {
             const normalized = raw.toLowerCase().replace(/[_\- ]/g, '');
             if (WidgetAliases[normalized]) return WidgetAliases[normalized];
-            
+
             // Fallback: If normalization didn't find it, try direct uppercase with underscores
             const upperRaw = raw.toUpperCase().replace(/[- ]/g, '_');
             if (WidgetTypeNames[upperRaw] !== undefined) return upperRaw;
-            
+
             // Direct alias check for known common strings
             if (normalized === 'companylogoslider') return 'COMPANY_LOGO_SLIDER';
             if (normalized === 'crossslider') return 'CROSS_SLIDER';
@@ -154,11 +154,11 @@ class WidgetDetector {
                 const resolved = WidgetDetector.identify({ type: rawType });
                 if (resolved !== 'Unknown') {
                     const uid = json.unique_widget_id || json.unique_id || null;
-                    return { 
-                        typeName: resolved, 
-                        typeId: WidgetTypeNames[resolved] ?? null, 
+                    return {
+                        typeName: resolved,
+                        typeId: WidgetTypeNames[resolved] ?? null,
                         uniqueWidgetId: uid,
-                        data: json 
+                        data: json
                     };
                 }
             }

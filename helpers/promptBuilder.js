@@ -169,8 +169,8 @@ ${sensoryTruth}
    - **PRE-ANALYSIS MANDATE**: If you identify **ACTUAL_SQUEEZE_DETECTED** in your step-by-step thinking (Pre-Analysis), you are PROHIBITED from reporting a PASS for Category A.
     - **THE SLICE-FAIL**: If the "tails" of these letters are flat, missing, or truncated horizontally, it is a clinical **FAIL_CONTENT_TRUNCATED**. 
    - **TRANSCRIPTION TEST (EXPANDED POPUPS)**: For expanded popups, you MUST compare the last word in the screenshot to the last word in the Ground Truth JSON (SECTION 0). 
-    - **DOT-FAIL MANDATE**: If a word ends in multiple dots (e.g., "kn...", "know..", or "...."), it is a clinical **FAIL_CONTENT_TRUNCATED**. 
-    - **COMPACT WIDGET EXCEPTION**: For **MARQUEE_STRIPE**, **STRIP_SLIDER**, and **FLOATING_TOAST**, truncation with an ellipsis ("...") in the review text is **EXPECTED** and is a **PASS**. 
+    - **DOT-FAIL MANDATE**: If a word ends in multiple dots (e.g., "kn...", "know..", or "...."), it is a clinical **FAIL_CONTENT_TRUNCATED**. (Exception: For **FLOATING_TOAST**, ellipsis "..." in any field is **PASS**).
+     - **COMPACT WIDGET EXCEPTION**: For **MARQUEE_STRIPE**, **STRIP_SLIDER**, and **FLOATING_TOAST**, truncation with an ellipsis ("...") in the review text, reviewer name, or role/designation is **EXPECTED** and is a **PASS**. The FLOATING_TOAST uses a fixed-height card design that clips long text with CSS ellipsis in both the compact badge AND the expanded popup. Do NOT trigger FAIL_CONTENT_TRUNCATED for FLOATING_TOAST. 
    - **WORD-SYNC**: If JSON ends with "know" but screenshot says "kn..." or has an ellipsis not in the source, trigger **FAIL_CONTENT_TRUNCATED**.
 5. **LIQUID VIEWPORT SCAN**: Specifically check the BOTTOM and RIGHT edges. If a card ends in a straight, non-rounded vertical line (unintended truncation), it is a clinical **FAIL_LAYOUT_CLIPPED**. (Note: Circular navigation arrows are EXEMPT from this check).
 6. **CORNER SYMMETRY AUDIT**: You must verify that the Top-Right and Bottom-Right corners mirror their Left-Hand counterparts. If the left side is rounded but the right side is sharp, it is a clinical **FAIL**.
@@ -335,7 +335,13 @@ ${isMultiImage ? `
         - If 'show_full_review' is **"0"**: Truncation in the body is a **PASS** (expected).
         - If 'show_full_review' is **"1"**: ANY truncation (ellipsis '...' or cut-off sentences) is a clinical **FAIL**. The user is supposed to see 100% of the text.
     - **EXPANDED POPUPS/MODALS**: Any truncation in the review body is a clinical **FAIL**.
-- **FAIL CRITERIA**: FAIL ONLY if the ellipsis ("...") appears on the **FIRST line** of the **NAME** or **JOB ROLE**.
+      - **FLOATING_TOAST EXCEPTION**: For FLOATING_TOAST widget type, the expanded popup card uses a fixed-height design with CSS ellipsis for both review body text AND reviewer name/role. Ellipsis ("...") in ANY field of a FLOATING_TOAST popup is **EXPECTED behavior** and is a **PASS**. Do NOT trigger FAIL_CONTENT_TRUNCATED for FLOATING_TOAST expanded popups.
+- **FAIL CRITERIA**: FAIL ONLY if the ellipsis ("...") appears on the **FIRST visual line** of the **NAME** or the **FIRST visual line** of the **JOB ROLE** (designation/subtitle).
+  - **VISUAL LINE AUDIT**: You MUST look at the screenshot very carefully to see if the Job Role text wraps onto multiple vertical lines in the UI.
+  - **EXAMPLE**: If you see:
+    - Line 1: 'Chopra Center Certified' (or 'Energy Healer, Life Coach,')
+    - Line 2: 'instructor at Bonnie...' (or 'Caracas,...')
+    This means the text wrapped to the second line. Because the ellipsis ("...") is on the **second visual line**, it is **EXPECTED/ACCEPTABLE truncation** and is a **PASS**. You are FORBIDDEN from combining these lines into a single string to claim it is truncated on the first line. Only fail if the ellipsis appears on the first visual line of the text block under the name.
 - **MANDATORY TRIGGER**: If failing, use the exact token **FAIL_CONTENT_TRUNCATED**.
 - **FAIL**: Characters cut off or sliced in the middle.
 - **JSON LEAKAGE**: FAIL [Category C] if the review body contains JSON-like structures (e.g., '{"pros":...', 'null', '{"cons":...') instead of natural language. Use token **FAIL_CONTENT_JSON_LEAK**.

@@ -164,8 +164,17 @@ class FloatingToastHelper {
                 capturedSignatures.add(signature);
 
                 // 📸 Capture Preview (Focused Crop)
+                // Guard: re-check visibility before screenshotting — badge may have animated out
                 try {
-                    const pBox = await previewCard.boundingBox();
+                    const stillVisible = await page.evaluate(el => {
+                        if (!el) return false;
+                        const s = window.getComputedStyle(el);
+                        const r = el.getBoundingClientRect();
+                        return s.display !== 'none' && s.visibility !== 'hidden'
+                            && parseFloat(s.opacity) > 0.1 && r.width > 5 && r.height > 5;
+                    }, previewCard).catch(() => false);
+
+                    const pBox = stillVisible ? await previewCard.boundingBox() : null;
                     if (pBox) {
                         const vSize = page.viewportSize();
                         const padding = 60; // Generous context
@@ -180,6 +189,8 @@ class FloatingToastHelper {
                             },
                             animations: 'disabled'
                         }));
+                    } else if (!stillVisible) {
+                        console.log('[FloatingToastHelper] ⏭️  Badge animated out before screenshot — skipping blank frame.');
                     }
                 } catch (e) { }
 

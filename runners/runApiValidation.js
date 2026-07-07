@@ -300,7 +300,7 @@ async function run() {
                     }
                 }
 
-                await helper.init(url, typeId, configuration);
+                await helper.init(url, typeId, configuration, widgetUUID);
                 const validationResult = await helper.validateWithAI(staticFeatures);
 
                 const record = {
