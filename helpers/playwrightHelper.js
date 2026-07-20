@@ -160,7 +160,7 @@ class PlaywrightHelper {
             return {
                 status: 'BLOCKED_URL',
                 error_code: 'BLOCKED_BY_FILTER',
-                message: 'The URL matches a blocked pattern (preview, editor, admin, config, local environment, or Wix sandbox iframe).'
+                message: 'Skipped: Visual validation is not supported on site editors, preview links, admin panels, configuration dashboards, or local environments.'
             };
         }
 
@@ -196,21 +196,21 @@ class PlaywrightHelper {
                     return {
                         status: 'NOT_FOUND',
                         error_code: 'HTTP_404',
-                        message: 'Page not found (404)'
+                        message: 'Skipped: Page not found (HTTP 404). Please verify the URL.'
                     };
                 }
                 if (status === 401 || status === 403) {
                     return {
                         status: 'ACCESS_DENIED',
                         error_code: status === 401 ? 'HTTP_401' : 'HTTP_403',
-                        message: status === 401 ? 'Access denied (401)' : 'Access denied (403)'
+                        message: `Skipped: Access denied (HTTP ${status}). The site is password-protected or restricted.`
                     };
                 }
                 if (status >= 500) {
                     lastError = {
                         status: 'UNREACHABLE',
                         error_code: `HTTP_${status}`,
-                        message: `Server returned an error (${status})`
+                        message: `Skipped: The website server returned a status error (HTTP ${status}).`
                     };
                 } else {
                     // REACHABLE: Check if the widget is empty before returning REACHABLE
