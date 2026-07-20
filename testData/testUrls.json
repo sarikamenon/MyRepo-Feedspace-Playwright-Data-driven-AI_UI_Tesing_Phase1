@@ -1,8 +1,8 @@
 {
     "data": [
         {
-            "url": "https://robertculpepper.me/private-advisory/",
-            "type": "carousel_slider",
+            "url": "https://writeupcastle.com/",
+            "type": "MARQUEE_LEFTRIGHT",
             "configurations": {
                 "is_show_arrows_buttons": "1",
                 "is_show_indicators": "1"

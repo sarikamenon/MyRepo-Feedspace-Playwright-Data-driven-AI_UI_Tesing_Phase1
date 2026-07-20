@@ -108,7 +108,7 @@ async function run() {
 
     const browser = await chromium.launch({
         headless: process.env.HEADLESS === 'false' ? false : true, // Default to headless for consistency
-        channel: 'chrome', 
+        channel: 'chrome',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -233,7 +233,7 @@ async function run() {
                     feature_results: []
                 }
             });
-            
+
             // Incremental Progress Report
             const partialReportPath = path.join(process.cwd(), 'reports', 'current_progress.json');
             fs.writeFileSync(partialReportPath, JSON.stringify({ runs: results }, null, 2));

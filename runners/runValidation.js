@@ -61,10 +61,10 @@ async function run() {
         // --- CLI ARGUMENT PARSING ---
         const args = process.argv.slice(2);
         const urlArg = args.find(a => a.startsWith('--url='))?.split('=')[1] || (args[args.indexOf('--url') + 1]);
-        const typeArg = args.find(a => a.startsWith('--type='))?.split('=')[1] || 
-                        args.find(a => a.startsWith('--widget='))?.split('=')[1] ||
-                        (args[args.indexOf('--type') + 1]) ||
-                        (args[args.indexOf('--widget') + 1]);
+        const typeArg = args.find(a => a.startsWith('--type='))?.split('=')[1] ||
+            args.find(a => a.startsWith('--widget='))?.split('=')[1] ||
+            (args[args.indexOf('--type') + 1]) ||
+            (args[args.indexOf('--widget') + 1]);
         const widthArg = args.find(a => a.startsWith('--width='))?.split('=')[1] || (args[args.indexOf('--width') + 1]);
         const heightArg = args.find(a => a.startsWith('--height='))?.split('=')[1] || (args[args.indexOf('--height') + 1]);
 
@@ -112,7 +112,7 @@ async function run() {
 
     const browser = await chromium.launch({
         headless: process.env.HEADLESS === 'false' ? false : true, // Default to headless for consistency
-        channel: 'chrome', 
+        channel: 'chrome',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -237,7 +237,7 @@ async function run() {
                     feature_results: []
                 }
             });
-            
+
             // Incremental Progress Report
             const partialReportPath = path.join(process.cwd(), 'reports', 'current_progress.json');
             fs.writeFileSync(partialReportPath, JSON.stringify({ runs: results }, null, 2));

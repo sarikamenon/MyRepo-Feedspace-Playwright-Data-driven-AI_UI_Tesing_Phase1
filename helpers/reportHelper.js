@@ -20,10 +20,10 @@ class ReportHelper {
         // Calculate Granular Summary
         data.summary.per_widget = this.calculatePerWidgetSummary(data.runs);
 
-        // Inject reason property into runs for FAIL/ERROR runs
+        // Inject reason property into runs for FAIL/ERROR/FALSE_INVOCATION runs
         if (Array.isArray(data.runs)) {
             data.runs.forEach(run => {
-                if (run.status === 'FAIL' || run.status === 'ERROR') {
+                if (run.status === 'FAIL' || run.status === 'ERROR' || run.status === 'FALSE_INVOCATION') {
                     run.reason = this.getFailureReason(run);
                 }
             });
@@ -47,7 +47,7 @@ class ReportHelper {
         runs.forEach(run => {
             const type = run.widgetType || 'UNKNOWN';
             if (!stats[type]) {
-                stats[type] = { tested: 0, passed: 0, failed: 0, errors: 0 };
+                stats[type] = { tested: 0, passed: 0, failed: 0, errors: 0, false_invocations: 0 };
             }
             stats[type].tested++;
             if (run.status === 'ERROR') {
@@ -56,6 +56,8 @@ class ReportHelper {
                 stats[type].passed++;
             } else if (run.status === 'FAIL') {
                 stats[type].failed++;
+            } else if (run.status === 'FALSE_INVOCATION' || run.status === 'BLOCKED_URL') {
+                stats[type].false_invocations++;
             }
         });
         return stats;
@@ -64,12 +66,18 @@ class ReportHelper {
     printConsoleSummary(data) {
         console.log('\n=======================================');
         console.log(`Total Widgets Tested: ${data.summary.total}`);
+        if (data.summary.skipped > 0) {
+            console.log(`Total Skipped / False Invocations: ${data.summary.skipped}`);
+        }
         Object.entries(data.summary.per_widget).forEach(([type, s]) => {
             console.log(`\n${type.toLowerCase()}:`);
             console.log(`  Widgets Tested: ${s.tested}`);
             console.log(`  Passed: ${s.passed}`);
             console.log(`  Failed: ${s.failed}`);
             console.log(`  Errors: ${s.errors}`);
+            if (s.false_invocations > 0) {
+                console.log(`  Skipped (False Invocation / Blocked): ${s.false_invocations}`);
+            }
         });
         console.log('=======================================\n');
     }
@@ -78,6 +86,7 @@ class ReportHelper {
         switch (status) {
             case 'PASS': return 'pass';
             case 'FAIL': return 'fail';
+            case 'FALSE_INVOCATION': return 'false-invocation';
             case 'Not Applicable': return 'na';
             case 'WARNING': return 'warn';
             case 'ERROR': return 'error';
@@ -94,9 +103,9 @@ class ReportHelper {
         }
         if (run.aiAnalysis) {
             if (run.status === 'FAIL' || run.aiAnalysis.overall_status === 'FAIL') {
-                const hasFeatureFail = Array.isArray(run.aiAnalysis.feature_results) && 
+                const hasFeatureFail = Array.isArray(run.aiAnalysis.feature_results) &&
                     run.aiAnalysis.feature_results.some(f => f.status === 'FAIL');
-                const hasAestheticFail = Array.isArray(run.aiAnalysis.aesthetic_results) && 
+                const hasAestheticFail = Array.isArray(run.aiAnalysis.aesthetic_results) &&
                     run.aiAnalysis.aesthetic_results.some(a => a.status === 'FAIL');
 
                 if (hasFeatureFail && hasAestheticFail) {
@@ -127,8 +136,8 @@ class ReportHelper {
                 body { font-family: 'Segoe UI', sans-serif; padding: 30px; background: #f4f7f6; color: #333; }
                 .container { max-width: 1200px; margin: 0 auto; }
                 
-                .header { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 30px; }
-                .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+                 .header { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 30px; }
+                .dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; margin-bottom: 30px; }
                 .card { background: #fff; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
                 .card h3 { margin: 0; color: #666; font-size: 14px; text-transform: uppercase; }
                 .card .val { font-size: 32px; font-weight: bold; margin-top: 10px; }
@@ -140,7 +149,8 @@ class ReportHelper {
                 .total { border-left: 5px solid #2196f3; }
                 .passed { border-left: 5px solid #4caf50; color: #2e7d32; }
                 .failed { border-left: 5px solid #f44336; color: #c62828; }
-                .errors { border-left: 5px solid #ff9800; color: #ef6c00; }
+                .errors { border-left: 5px solid #ef6c00; color: #ef6c00; }
+                .skipped { border-left: 5px solid #d97706; color: #b45309; }
 
                 .run-card { background: #fff; margin-bottom: 20px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #eee; }
                 .run-header { padding: 15px 20px; background: #fafafa; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
@@ -151,6 +161,7 @@ class ReportHelper {
                 .hidden-badge { background: #e0f2fe; color: #0369a1; }
                 .na { background: #f3f4f6; color: #4b5563; }
                 .fail { background: #ffebee; color: #c62828; }
+                .false-invocation { background: #fffbeb; color: #b45309; }
                 .error { background: #fff3e0; color: #ef6c00; }
                 .warn { background: #f5f5f5; color: #616161; }
 
@@ -162,12 +173,14 @@ class ReportHelper {
                 .hidden-pass-row { background-color: #f0f9ff !important; }
                 .na-row { background-color: #f9fafb !important; }
                 .fail-row { background-color: #fef2f2 !important; }
+                .false-invocation-row { background-color: #fffbeb !important; }
                 .warn-row { background-color: #fffbeb !important; }
                 
                 .pass-row td { color: #166534; }
                 .hidden-pass-row td { color: #0369a1; }
                 .na-row td { color: #6b7280; }
                 .fail-row td { color: #991b1b; }
+                .false-invocation-row td { color: #b45309; }
                 .warn-row td { color: #92400e; }
                 
                 .screenshot-prev { max-width: 400px; border: 1px solid #ddd; margin-top: 15px; border-radius: 4px; }
@@ -188,6 +201,7 @@ class ReportHelper {
                     <div class="card passed"><h3>Passed</h3><div class="val">${summary.passed}</div></div>
                     <div class="card failed"><h3>Failed</h3><div class="val">${summary.failed}</div></div>
                     <div class="card errors"><h3>Errors</h3><div class="val">${summary.errors}</div></div>
+                    <div class="card skipped"><h3>Skipped</h3><div class="val">${summary.skipped || 0}</div></div>
                 </div>
 
                 <h2>Summary by Widget Type</h2>
@@ -223,12 +237,16 @@ class ReportHelper {
                             <span class="badge ${this.getBadgeClass(run.status)}">${run.status}</span>
                         </div>
                         <div class="run-body">
-                            ${run.status === 'FAIL' || run.status === 'ERROR' ? `
-                                <div style="margin-bottom: 20px; padding: 12px 20px; background: #fff5f5; border-left: 4px solid #ef4444; border-radius: 4px; font-size: 14px; color: #b91c1c;">
+                             ${run.status === 'FAIL' || run.status === 'ERROR' || run.status === 'FALSE_INVOCATION' ? `
+                                <div style="margin-bottom: 20px; padding: 12px 20px; 
+                                     background: ${run.status === 'FALSE_INVOCATION' ? '#fffbeb' : '#fff5f5'}; 
+                                     border-left: 4px solid ${run.status === 'FALSE_INVOCATION' ? '#f59e0b' : '#ef4444'}; 
+                                     border-radius: 4px; font-size: 14px; 
+                                     color: ${run.status === 'FALSE_INVOCATION' ? '#b45309' : '#b91c1c'};">
                                     <strong>Reason:</strong> ${this.getFailureReason(run)}
                                 </div>
                             ` : ''}
-                            ${run.error && run.status !== 'FAIL' && run.status !== 'ERROR' ? `<div style="color:red; padding:10px; background:#fff0f0; border-radius:4px; margin-bottom: 20px;">Error: ${run.error}</div>` : ''}
+                            ${run.error && run.status !== 'FAIL' && run.status !== 'ERROR' && run.status !== 'FALSE_INVOCATION' ? `<div style="color:red; padding:10px; background:#fff0f0; border-radius:4px; margin-bottom: 20px;">Error: ${run.error}</div>` : ''}
                             ${run.error ? '' : `
                                 <details style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                                     <summary style="padding: 12px 20px; background: #fff5eb; color: #92400e; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">

@@ -89,7 +89,81 @@ const DISTRACTION_SELECTORS = [
 ];
 
 class PlaywrightHelper {
+    static isBlockedUrl(urlStr) {
+        if (!urlStr || typeof urlStr !== 'string') return false;
+        try {
+            let normalized = urlStr.trim().toLowerCase();
+            if (!/^https?:\/\//i.test(normalized)) {
+                normalized = 'https://' + normalized;
+            }
+            const url = new URL(normalized);
+            const hostname = url.hostname;
+            const pathname = url.pathname;
+
+            // 1. Wix sandboxed iframe filesusr.com
+            if (hostname.includes('filesusr.com') || hostname.includes('fileusr.com')) {
+                return true;
+            }
+
+            // 2. Local & Private environments
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+                return true;
+            }
+
+            // 3. Subdomains check
+            if (
+                hostname.startsWith('preview.') || hostname.includes('.preview.') ||
+                hostname.startsWith('editor.') || hostname.includes('.editor.') ||
+                hostname.startsWith('sitebuilder.') || hostname.includes('.sitebuilder.') ||
+                hostname.startsWith('config.') || hostname.includes('.config.') ||
+                hostname.startsWith('admin.') || hostname.includes('.admin.')
+            ) {
+                return true;
+            }
+
+            // 4. Path segments check (exact segment boundaries)
+            const pathSegments = pathname.split('/');
+            const blockedPathSegments = [
+                'preview', 'editor', 'design', 'builder', 'admin',
+                'wp-admin', 'config', 'login', 'signin', 'checkout', 'cart'
+            ];
+
+            if (pathSegments.some(segment => blockedPathSegments.includes(segment))) {
+                return true;
+            }
+
+            // Other path-based checks (like wp-admin.php or sitebuilder filenames)
+            if (pathname.includes('wp-admin') || pathname.includes('sitebuilder')) {
+                return true;
+            }
+
+        } catch (e) {
+            // Fallback substring checks with word boundary regexes
+            const lowerUrl = urlStr.toLowerCase();
+            if (lowerUrl.includes('filesusr.com') || lowerUrl.includes('fileusr.com')) return true;
+            if (lowerUrl.includes('localhost') || lowerUrl.includes('127.0.0.1') || lowerUrl.includes('0.0.0.0')) return true;
+
+            const blockedKeywords = [
+                'preview', 'editor', 'design', 'builder', 'sitebuilder',
+                'admin', 'wp-admin', 'config', 'login', 'signin', 'checkout', 'cart'
+            ];
+            for (const keyword of blockedKeywords) {
+                const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+                if (regex.test(lowerUrl)) return true;
+            }
+        }
+        return false;
+    }
+
     static async checkReachability(url, maxAttempts = 3, targetWidgetId = null) {
+        if (PlaywrightHelper.isBlockedUrl(url)) {
+            return {
+                status: 'BLOCKED_URL',
+                error_code: 'BLOCKED_BY_FILTER',
+                message: 'The URL matches a blocked pattern (preview, editor, admin, config, local environment, or Wix sandbox iframe).'
+            };
+        }
+
         const axios = require('axios');
         const https = require('https');
 
@@ -274,6 +348,7 @@ class PlaywrightHelper {
         // widgetTypeId may be a numeric ID (e.g. 5) or a string name (e.g. "masonry")
         this.expectedType = WidgetDetector.identify({ type: widgetTypeId }) || 'Unknown';
         this.widgetType = 'Unknown';
+        this.feedspaceActivitySeen = false;
 
         console.log(`[PlaywrightHelper] Expected widget type from config: ${this.expectedType} (raw: ${widgetTypeId})`);
 
@@ -478,10 +553,11 @@ class PlaywrightHelper {
         // Trigger lazy-loaded scripts by scrolling the page early.
         await this._smartScroll();
 
+        let count = 0;
         // 3. Find any candidate container and scroll to it to trigger IntersectionObserver sentinel
         try {
             const candidates = this.page.locator(SELECTOR_STRING);
-            const count = await candidates.count();
+            count = await candidates.count();
             console.log(`[PlaywrightHelper] Pre-scroll check: Found ${count} candidate containers for script triggering.`);
             for (let i = 0; i < count; i++) {
                 const candidate = candidates.nth(i);
@@ -498,30 +574,27 @@ class PlaywrightHelper {
         const startTime = Date.now();
         let found = false;
 
+        // Reduce wait time if no candidate selectors are present at all
+        const maxWaitTime = count > 0 ? 45000 : 5000;
+
         // 4. Wait for either a network response OR the script tag / initialized widget to appear in DOM
-        while (Date.now() - startTime < 45000) {
+        while (Date.now() - startTime < maxWaitTime) {
             // Check network state
             const networkHit = this.detectedNetworkTypes.size > 0;
 
             // Check DOM state - must be actual script or an initialized widget container (having shadowRoot or children)
-            let scriptTag = false;
-            for (const frame of this.page.frames()) {
-                const hasTag = await frame.evaluate(() => {
-                    const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
-                    const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
-                        return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
-                    });
-                    return hasScript || hasInitializedWidget;
-                }).catch(() => false);
-                if (hasTag) {
-                    scriptTag = true;
-                    break;
-                }
-            }
+            const scriptTag = await this.page.evaluate(() => {
+                const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
+                const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
+                    return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
+                });
+                return hasScript || hasInitializedWidget;
+            }).catch(() => false);
 
             if (networkHit || scriptTag) {
                 console.log(`[PlaywrightHelper] Feedspace signature detected (${networkHit ? 'Network' : 'DOM'}).`);
                 found = true;
+                this.feedspaceActivitySeen = true;
                 break;
             }
             await this._sleep(2000);
@@ -589,13 +662,15 @@ class PlaywrightHelper {
             await this.page.evaluate(async () => {
                 const scrollStep = 800;
                 const delay = 300;
-                const totalHeight = document.body.scrollHeight;
                 let currentPos = 0;
 
-                while (currentPos < totalHeight) {
+                while (currentPos < document.body.scrollHeight) {
                     window.scrollBy(0, scrollStep);
                     currentPos += scrollStep;
                     await new Promise(r => setTimeout(r, delay));
+
+                    // Safety guard to prevent infinite scroll loops on infinite scroll pages
+                    if (currentPos > 25000) break;
                 }
 
                 // Jump back to top
@@ -627,8 +702,12 @@ class PlaywrightHelper {
             // ── STEP 1: Wait for any widget marker ───────────────────────────
             let locatorFrame = this.page;
 
+            // If no Feedspace activity was seen during initialization, reduce wait time from 45s to 0s (skip wait)
+            const activityDetected = this.feedspaceActivitySeen || this.detectedNetworkTypes.size > 0;
+            const domWaitTimeout = activityDetected ? 45000 : 0;
+
             // Wait for selector in any frame
-            const foundFrame = await this._waitForSelectorInAnyFrame(SELECTOR_STRING, 45000);
+            const foundFrame = await this._waitForSelectorInAnyFrame(SELECTOR_STRING, domWaitTimeout);
             if (foundFrame) {
                 locatorFrame = foundFrame;
                 console.log(`[PlaywrightHelper] Found active frame containing widget.`);
@@ -641,7 +720,7 @@ class PlaywrightHelper {
                 const signInResult = await this._handleSignInPage();
                 if (signInResult) return signInResult;
 
-                const reason = 'Empty State: No widget embedded or visible from the frontend (No Feedspace widget selectors matched on the page)';
+                const reason = 'False invocation: Feedspace widget not embedded (No Feedspace widget selectors matched on the page)';
                 console.warn(`[PlaywrightHelper] 🛑 ${reason}`);
                 this.widgetType = 'Widget Not Found';
                 this.typeMatchResult = {
@@ -651,7 +730,7 @@ class PlaywrightHelper {
                     reason: reason
                 };
 
-                return this._buildErrorResult(reason);
+                return this._buildErrorResult(reason, 'FALSE_INVOCATION');
             }
             console.log(`[PlaywrightHelper] Found ${count} candidate(s)`);
 
@@ -791,10 +870,13 @@ class PlaywrightHelper {
 
                 const seenTypes = [...new Set(Object.values(this.networkWidgetMap))];
                 let reason;
+                let statusOverride = 'FALSE_INVOCATION';
                 if (seenTypes.length > 0) {
                     reason = `Configuration Mismatch: Expected widget type ${this.expectedType}, but widget identified as ${seenTypes.join(', ')}`;
+                    statusOverride = 'FAIL';
                 } else {
-                    reason = `Empty State: No widget embedded or visible from the frontend (No valid container or network signature found for ${this.expectedType})`;
+                    reason = `False invocation: Feedspace widget not embedded (No valid container or network signature found for ${this.expectedType})`;
+                    statusOverride = 'FALSE_INVOCATION';
                 }
                 console.warn(`[PlaywrightHelper] ⚠️  ${reason}`);
                 this.widgetType = 'Widget Not Found';
@@ -805,7 +887,7 @@ class PlaywrightHelper {
                     reason: reason
                 };
 
-                return this._buildErrorResult(reason);
+                return this._buildErrorResult(reason, statusOverride);
             }
 
             // --- Continue with normal flow if visible match was found ---
@@ -1087,10 +1169,10 @@ class PlaywrightHelper {
                         // FIX: Only call countDeep once on the root or its shadow.
                         // Recursive logic handles the rest correctly.
                         const brandingSels = [
-                             '.feedspace-branding-footer-link', '.feedspace-branding',
-                             '.feedspace-branding-pill', '[class*="branding-footer"]',
-                             '[class*="feedspace-branding"]'
-                         ];
+                            '.feedspace-branding-footer-link', '.feedspace-branding',
+                            '.feedspace-branding-pill', '[class*="branding-footer"]',
+                            '[class*="feedspace-branding"]'
+                        ];
                         const context = el.shadowRoot || el;
                         const iconsFound = findDeep(context, iconSels);
                         const starsFound = findDeep(context, starSels);
@@ -1200,10 +1282,10 @@ class PlaywrightHelper {
 
 
                             const brandingSels = [
-                             '.feedspace-branding-footer-link', '.feedspace-branding',
-                             '.feedspace-branding-pill', '[class*="branding-footer"]',
-                             '[class*="feedspace-branding"]'
-                         ];
+                                '.feedspace-branding-footer-link', '.feedspace-branding',
+                                '.feedspace-branding-pill', '[class*="branding-footer"]',
+                                '[class*="feedspace-branding"]'
+                            ];
 
                             const findBranding = (root) => {
                                 const list = [];
@@ -1438,7 +1520,7 @@ class PlaywrightHelper {
             if (locator) {
                 await locator.evaluate(el => {
                     el.setAttribute('data-fs-target-widget', 'true');
-                }).catch(() => {});
+                }).catch(() => { });
 
                 // Recursive Frame Marking: Walk all the way up the parent frame tree and mark
                 // every frame element as kept so page isolation doesn't hide any ancestor frames.
@@ -1448,7 +1530,7 @@ class PlaywrightHelper {
                     if (frameElementHandle) {
                         await frameElementHandle.evaluate(el => {
                             el.setAttribute('data-fs-keep-iframe', 'true');
-                        }).catch(() => {});
+                        }).catch(() => { });
                     }
                     currentFrame = currentFrame.parentFrame();
                 }
@@ -1829,14 +1911,14 @@ class PlaywrightHelper {
                     targets.forEach(target => {
                         // Check if the target is within the current root subtree
                         if (root.contains && !root.contains(target)) return;
-                        
+
                         let curr = target;
                         while (curr && curr !== root) {
                             keep.add(curr);
                             curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
                         }
                         if (curr) keep.add(curr); // Add root if we reached it
-                        
+
                         const children = target.querySelectorAll('*');
                         children.forEach(c => {
                             keep.add(c);
@@ -1967,7 +2049,7 @@ class PlaywrightHelper {
         return null;
     }
 
-    _buildErrorResult(reason) {
+    _buildErrorResult(reason, statusOverride = 'FAIL') {
         const staticFeatures = this.staticFeatures || [];
         const featureResults = staticFeatures.map(f => ({
             feature: typeof f === 'string' ? f : (f.name || 'Unknown'),
@@ -1975,7 +2057,7 @@ class PlaywrightHelper {
             config_status: 'Visible',
             issue: reason,
             remarks: 'Feature is absent due to Empty State/No widget embedded.',
-            status: 'FAIL'
+            status: statusOverride
         }));
 
         if (featureResults.length === 0) {
@@ -1985,18 +2067,18 @@ class PlaywrightHelper {
                 config_status: 'Visible',
                 issue: reason,
                 remarks: 'Validation failed.',
-                status: 'FAIL'
+                status: statusOverride
             });
         }
 
         const aestheticResults = [
-            { category: "A. LAYOUT & SPACING", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "B. ELEMENT CONTAINMENT", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "C. CONTENT & TEXT RENDERING", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "D. AVATAR RENDERING", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "E. MEDIA & IMAGES", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "F. THEME & COLOR VISIBILITY", issue: reason, severity: "CRITICAL", status: "FAIL" },
-            { category: "G. POPUPS & MODALS", issue: reason, severity: "CRITICAL", status: "FAIL" }
+            { category: "A. LAYOUT & SPACING", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "B. ELEMENT CONTAINMENT", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "C. CONTENT & TEXT RENDERING", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "D. AVATAR RENDERING", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "E. MEDIA & IMAGES", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "F. THEME & COLOR VISIBILITY", issue: reason, severity: "CRITICAL", status: statusOverride },
+            { category: "G. POPUPS & MODALS", issue: reason, severity: "CRITICAL", status: statusOverride }
         ];
 
         return {
@@ -2011,7 +2093,7 @@ class PlaywrightHelper {
                 networkSawType: this._networkHasType(this.expectedType)
             },
             aiAnalysis: {
-                overall_status: 'FAIL',
+                overall_status: statusOverride,
                 summary: reason,
                 analysis_message: reason,
                 feature_results: featureResults,
@@ -2229,12 +2311,14 @@ class PlaywrightHelper {
     }
 
     async _waitForSelectorInAnyFrame(selector, timeout = 45000) {
+        if (timeout <= 0) return null;
         const startTime = Date.now();
         while (Date.now() - startTime < timeout) {
             if (this.page.isClosed()) return null;
             for (const frame of this.page.frames()) {
                 try {
-                    const count = await frame.locator(selector).count();
+                    if (frame.isDetached()) continue;
+                    const count = await frame.locator(selector).count().catch(() => 0);
                     if (count > 0) {
                         return frame;
                     }

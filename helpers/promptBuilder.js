@@ -203,6 +203,7 @@ ${feedsJson}
 ============================================================
 - **HORIZONTAL PARITY**: You MUST compare the left-hand padding/rounding to the right-hand padding/rounding.
 - **THE RECTIPHOBIA MANDATE**: If a card has a "Straight Edge Cut" on the right (looks like it's bleeding off the screen or container) while the left edge has a rounded corner, it is a clinical **FAIL_LAYOUT_ASYMMETRIC**.
+    - **CAROUSEL/SLIDER EXCEPTION**: This mandate does **NOT** apply to **CAROUSEL_SLIDER**, **REVIEW_CAROUSEL**, or any other **SLIDER** / **CAROUSEL** / **MARQUEE** widgets where cards scroll horizontally and are designed to be partially cut off/sliced on the right or left edge. For these widgets, you MUST mark this check as **PASS** and you are PROHIBITED from outputting keywords like "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "ASYMMETRIC", or "ASYMMETRY".
 - **SYMMETRY PROOF**: State: "The Left edge has [X] rounding, but the Right edge is a sharp [Y]-degree cut."
 - **WIDGET-LEVEL CENTER**: Is the widget centered in its own container, or is it shoved against a boundary?
 - **ARROW OVERLAP EXCEPTION (INTENDED DESIGN)**: For Carousel/Slider widgets, Navigation Arrows (Circular buttons) are **PERMITTED** to overlap the card background or border. This is NOT a failure unless Rule 18.A applies.
@@ -216,7 +217,7 @@ ${feedsJson}
     - Mandate a 15px "Safety Buffer" on the RIGHT-HAND edge of every screenshot.
     - **HORIZON FAIL**: If any part of the widget content (Arc edge, Star point, or Text character) touches the absolute right image boundary, it is a clinical **FAIL_LAYOUT_CLIPPED**.
     - **SUB-PIXEL CONTACT**: Even if it looks intended, if there is 0px of air between content and edge, trigger **FAIL**.
-    - **MARQUEE/SLIDER EXCEPTION**: For **COMPANY_LOGO_SLIDER**, **SINGLE_SLIDER**, and **MARQUEE** widgets, logos or cards touching the LEFT or RIGHT image boundaries are **EXPECTED** behavior and MUST be marked as **PASS**. Only fail if content is sliced at the TOP or BOTTOM edges.
+    - **MARQUEE/SLIDER EXCEPTION**: For **COMPANY_LOGO_SLIDER**, **SINGLE_SLIDER**, **CAROUSEL_SLIDER**, **REVIEW_CAROUSEL**, and any **MARQUEE** or **SLIDER** or **CAROUSEL** widgets, logos or cards touching or bleeding off the LEFT or RIGHT image boundaries are **EXPECTED** behavior and MUST be marked as **PASS**. You are PROHIBITED from outputting keywords like "FAIL_LAYOUT_CLIPPED", "bleeding off", or "touching the edge" for horizontal scrolling edges in these widgets. Only fail if content is sliced at the TOP or BOTTOM edges.
 - **RULE 21: VERTICAL HIERARCHY AUDIT (AVATAR GROUPS)**:
     - Specifically audit the gap between the Avatar Row and the Text Label.
     - **COLLISION FAIL**: If a Star point touches/overlaps a letter, it is a clinical **FAIL_LAYOUT_BLOCKED**.
