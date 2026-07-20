@@ -125,7 +125,7 @@ class PlaywrightHelper {
             const pathSegments = pathname.split('/');
             const blockedPathSegments = [
                 'preview', 'editor', 'design', 'builder', 'admin',
-                'wp-admin', 'config', 'login', 'signin', 'checkout', 'cart'
+                'wp-admin', 'config'
             ];
 
             if (pathSegments.some(segment => blockedPathSegments.includes(segment))) {
@@ -145,7 +145,7 @@ class PlaywrightHelper {
 
             const blockedKeywords = [
                 'preview', 'editor', 'design', 'builder', 'sitebuilder',
-                'admin', 'wp-admin', 'config', 'login', 'signin', 'checkout', 'cart'
+                'admin', 'wp-admin', 'config'
             ];
             for (const keyword of blockedKeywords) {
                 const regex = new RegExp(`\\b${keyword}\\b`, 'i');
@@ -1991,24 +1991,29 @@ class PlaywrightHelper {
         const currentUrl = this.page.url().toLowerCase();
         const pageTitle = (await this.page.title().catch(() => '')).toLowerCase();
 
-        const isSignInPage = currentUrl.includes('/signin') ||
-            currentUrl.includes('/login') ||
-            currentUrl.includes('/sign-in') ||
-            (currentUrl.includes('signin') && !currentUrl.includes('feedspace')) ||
-            (currentUrl.includes('login') && !currentUrl.includes('feedspace')) ||
-            pageTitle.includes('login') ||
-            pageTitle.includes('sign in') ||
-            pageTitle.includes('signin');
+        // Check which type of page it matches
+        let pageType = null;
+        if (currentUrl.includes('/signin') || currentUrl.includes('/sign-in') || (currentUrl.includes('signin') && !currentUrl.includes('feedspace')) || pageTitle.includes('sign in') || pageTitle.includes('signin')) {
+            pageType = 'Sign-in Page';
+        } else if (currentUrl.includes('/login') || (currentUrl.includes('login') && !currentUrl.includes('feedspace')) || pageTitle.includes('login')) {
+            pageType = 'Login Page';
+        } else if (currentUrl.includes('/signout') || currentUrl.includes('/sign-out') || pageTitle.includes('sign out') || pageTitle.includes('signout')) {
+            pageType = 'Sign-out Page';
+        } else if (currentUrl.includes('/checkout') || (currentUrl.includes('checkout') && !currentUrl.includes('feedspace')) || pageTitle.includes('checkout')) {
+            pageType = 'Checkout Page';
+        } else if (currentUrl.includes('/cart') || (currentUrl.includes('cart') && !currentUrl.includes('feedspace')) || pageTitle.includes('cart')) {
+            pageType = 'Cart Page';
+        }
 
-        if (isSignInPage) {
-            const passMessage = 'This is the sign-in/login page, no Feedspace widgets found';
-            console.log(`[PlaywrightHelper] ℹ️ ${passMessage} (URL: ${this.page.url()})`);
-            this.widgetType = 'Sign-in Page';
+        if (pageType) {
+            const skipMessage = `Skipped: This is a ${pageType} without any Feedspace widgets embedded.`;
+            console.log(`[PlaywrightHelper] ℹ️ ${skipMessage} (URL: ${this.page.url()})`);
+            this.widgetType = pageType;
             this.typeMatchResult = {
                 expected: this.expectedType,
-                detected: 'Sign-in Page',
-                matched: true,
-                reason: passMessage
+                detected: pageType,
+                matched: false,
+                reason: skipMessage
             };
 
             const savedPaths = [];
@@ -2019,27 +2024,27 @@ class PlaywrightHelper {
                         const timestamp = Date.now();
                         const screenshotDir = path.join(process.cwd(), 'screenshots');
                         if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
-                        const screenshotPath = path.join(screenshotDir, `SigninPage_${timestamp}.png`);
+                        const screenshotPath = path.join(screenshotDir, `${pageType.replace(/\s+/g, '')}_${timestamp}.png`);
                         fs.writeFileSync(screenshotPath, buffer);
                         savedPaths.push(screenshotPath);
                     }
                 }
             } catch (e) {
-                console.warn(`[PlaywrightHelper] Could not take signin page screenshot: ${e.message}`);
+                console.warn(`[PlaywrightHelper] Could not take screenshot: ${e.message}`);
             }
 
             return {
                 expectedType: this.expectedType,
-                widgetType: 'Sign-in Page',
+                widgetType: pageType,
                 typeMatchResult: this.typeMatchResult,
                 capturedConfig: this.config,
                 aiAnalysis: {
-                    overall_status: 'PASS',
-                    summary: passMessage,
+                    overall_status: 'FALSE_INVOCATION',
+                    summary: skipMessage,
                     feature_results: [{
                         feature: 'Widget Presence Check',
-                        status: 'PASS',
-                        issue: passMessage
+                        status: 'FALSE_INVOCATION',
+                        issue: skipMessage
                     }]
                 },
                 screenshotPath: savedPaths[0] || null,
