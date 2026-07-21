@@ -87,15 +87,18 @@ class StripSliderHelper {
                     console.log(`[StripSliderHelper] Processing candidate ${successfulCaptures + 1}...`);
 
                     // A. Focused Card Snapshot (Ensures AI sees CTA/Date/ReadMore on the card itself)
-                    await target.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => { });
-                    const cardShot = await target.screenshot({ animations: 'disabled' }).catch(() => null);
+                    await target.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' })).catch(() => { });
+                    await context.waitForTimeout(500).catch(() => { });
+                    const cardShot = await target.screenshot({ type: 'jpeg', quality: 60, animations: 'disabled' }).catch(() => null);
                     if (cardShot) {
                         screenshots.push(cardShot);
                     }
 
                     // B. Interaction to open popup
                     await target.hover({ force: true }).catch(() => { });
-                    await target.click({ force: true, timeout: 3000 }).catch(() => { });
+                    await target.evaluate(node => node.click()).catch(async () => {
+                        await target.click({ force: true, timeout: 3000 }).catch(() => { });
+                    });
                     await target.dispatchEvent('click').catch(() => { });
                     await context.waitForTimeout(1000).catch(() => { });
 
@@ -109,16 +112,24 @@ class StripSliderHelper {
                     const popup = context.locator(popupSelectors.join(', ')).filter({ visible: true }).first();
 
                     const isVisible = await popup.isVisible().catch(() => false);
-                    if (isVisible) {
+                    
+                    // Verify if it's a real popup modal by checking for the close button
+                    const closeBtnSelectors = '.fe-review-box-close-icon, .feedspace-review-box-close-icon, .close-icon, .close-btn, button:has-text("X")';
+                    const closeBtn = popup.locator(closeBtnSelectors).first();
+                    const hasCloseBtn = await closeBtn.waitFor({ state: 'visible', timeout: 1500 }).then(() => true).catch(() => false);
+
+                    if (isVisible && hasCloseBtn) {
                         console.log(`[StripSliderHelper] Capture ${successfulCaptures + 1} Popup SUCCESS.`);
 
                         // ENSURE FULL VISIBILITY: Scroll the popup itself into the center of the viewport
-                        await popup.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => { });
+                        await popup.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' })).catch(() => { });
                         await context.waitForTimeout(500);
 
                         // Capture the full viewport while the popup is open
                         // This provides the "In-Context" view requested by the user.
                         const buf = await page.screenshot({
+                            type: 'jpeg',
+                            quality: 60,
                             fullPage: false,
                             animations: 'disabled'
                         }).catch(() => null);
@@ -129,16 +140,17 @@ class StripSliderHelper {
                         }
 
                         // D. Close popup
-                        const closeBtnSelectors = '.fe-review-box-close-icon, .feedspace-review-box-close-icon, .close-icon, .close-btn, button:has-text("X")';
-                        let closeBtn = context.locator(closeBtnSelectors).filter({ visible: true }).first();
                         const isCloseVisible = await closeBtn.isVisible().catch(() => false);
                         if (isCloseVisible) {
-                            await closeBtn.click().catch(() => { });
+                            await closeBtn.click({ force: true }).catch(() => { });
                         } else {
-                            // Fallback: Click top-left of viewport to close modal
+                            // Fallback: Press Escape and click top-left of viewport
+                            await page.keyboard.press('Escape').catch(() => { });
                             await page.mouse.click(10, 10).catch(() => { });
                         }
                         await context.waitForTimeout(500).catch(() => { });
+                    } else {
+                        console.log(`[StripSliderHelper] Candidate ${successfulCaptures + 1}: No real popup modal appeared (missing close button).`);
                     }
                 } catch (err) {
                     console.warn(`[StripSliderHelper] Interaction failed: ${err.message}`);

@@ -267,6 +267,14 @@ async function run() {
                 }
             });
 
+            // Add stealth initialization script to bypass bot checks (navigator.webdriver, chrome objects, languages)
+            await context.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            });
+
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
             helper.expectedType = typeName;
@@ -323,12 +331,17 @@ async function run() {
                 success = true; // Mark as success to exit retry loop
             } catch (error) {
                 console.error(`   > Error on attempt ${urlAttempt}: ${error.message}`);
-
+ 
                 if (urlAttempt >= maxUrlAttempts) {
+                    const isFalseInvocation = error.message.includes('404') || 
+                                              error.message.includes('403') || 
+                                              error.message.includes('401') ||
+                                              error.message.includes('not found') || 
+                                              error.message.includes('Access denied');
                     results.push({
                         url: url,
                         widgetType: typeName,
-                        status: 'ERROR',
+                        status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR',
                         error: error.message,
                         timestamp: new Date().toISOString()
                     });

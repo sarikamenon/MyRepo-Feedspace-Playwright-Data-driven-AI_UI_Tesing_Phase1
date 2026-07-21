@@ -314,6 +314,41 @@ class AIEngine {
                     res.issue = 'No visual defects detected (Read More buttons are not needed because all reviews are short)';
                     res.remarks = 'Read More buttons are present in the DOM but hidden because all review texts are short. This is expected and a PASS.';
                 }
+
+                const isSocialIcon = res.feature === "Show Social Platform Icon" || res.feature === "Show Social Icon" || res.feature === "Social Platform Icon";
+                if (isSocialIcon && res.status === 'FAIL') {
+                    const iconsFoundInDom = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH: Platform icons'));
+                    const issueText = (res.issue || "").toLowerCase();
+                    const remarksText = (res.remarks || "").toLowerCase();
+                    const reasonText = (aiData.analysis_message || "").toLowerCase();
+                    
+                    if (iconsFoundInDom) {
+                        console.log(`[AIEngine] Overriding Show Social Platform Icon to PASS: DOM Sniffer verified that platform icons are visible on at least one card.`);
+                        res.status = 'PASS';
+                        res.ui_status = 'Visible';
+                        res.issue = 'No visual defects detected';
+                        res.remarks = 'Social platform icons are visible in the UI on cards that have social platform data (verified by DOM Sniffer).';
+                    } else if (issueText.includes('web link import') || remarksText.includes('web link import') || reasonText.includes('web link import') ||
+                        issueText.includes('not expected') || remarksText.includes('not expected')) {
+                        console.log(`[AIEngine] Overriding Show Social Platform Icon to PASS: reviews are Web Link Imports, so social icons are not expected.`);
+                        res.status = 'PASS';
+                        res.ui_status = 'Absent';
+                        res.issue = 'No visual defects detected (Social icons are not expected for Web Link Import reviews)';
+                        res.remarks = 'The widget is configured to show social platform icons, but all currently rendered reviews are from Web Link Imports, which do not have a social platform logo. This is expected and a PASS.';
+                    }
+                }
+
+                const isRating = res.feature === "Show Review Ratings" || res.feature === "Show Star Ratings" || res.feature === "Review Ratings";
+                if (isRating && res.status === 'FAIL') {
+                    const starsFoundInDom = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH: Review Ratings'));
+                    if (starsFoundInDom) {
+                        console.log(`[AIEngine] Overriding Show Review Ratings to PASS: DOM Sniffer verified that star ratings are visible on at least one card.`);
+                        res.status = 'PASS';
+                        res.ui_status = 'Visible';
+                        res.issue = 'No visual defects detected';
+                        res.remarks = 'Review ratings (stars) are visible in the UI on cards that have rating data (verified by DOM Sniffer).';
+                    }
+                }
                 
                 // General noNavigationRequired override if not already handled
                 if (noNavigationRequired && (isArrow || isIndicator) && !arrowsAbsent && !indicatorsAbsent) {
@@ -345,6 +380,15 @@ class AIEngine {
                                 res.issue = 'No visual defects detected';
                             }
                         }
+                        if (lowIssue.includes('rating') || lowIssue.includes('star')) {
+                            const hasFailFeature = aiData.feature_results.some(f => 
+                                (f.feature === "Show Review Ratings" || f.feature === "Show Star Ratings") && f.status === "FAIL"
+                            );
+                            if (!hasFailFeature) {
+                                res.status = 'PASS';
+                                res.issue = 'No visual defects detected';
+                            }
+                        }
                     }
                 });
             }
@@ -370,6 +414,37 @@ class AIEngine {
                         severity: "CRITICAL"
                     });
                 }
+            }
+
+            // For vertical scrolling/grid widgets (MARQUEE_UPDOWN, MASONRY, VERTICAL_SCROLL), ignore layout failures caused by edge-clipping of scrolling cards
+            const skipVerticalClippingTypes = ['MARQUEE_UPDOWN', 'MASONRY', 'VERTICAL_SCROLL'];
+            if (skipVerticalClippingTypes.includes(widgetType) && aiData.aesthetic_results) {
+                aiData.aesthetic_results.forEach(res => {
+                    const cat = res.category.toUpperCase();
+                    if ((cat.includes("LAYOUT") || cat.includes("A. LAYOUT & SPACING")) && res.status === 'FAIL') {
+                        const issueText = (res.issue || "").toLowerCase();
+                        if (issueText.includes('clipped') || issueText.includes('truncated') || issueText.includes('cut off') || issueText.includes('boundary line') || issueText.includes('partial') || issueText.includes('override')) {
+                            console.log(`[AIEngine] Overriding LAYOUT & SPACING to PASS for ${widgetType}: card boundary/edge clipping is expected behavior.`);
+                            res.status = 'PASS';
+                            res.issue = 'No visual defects detected (edge clipping is expected vertical scrolling/grid behavior)';
+                        }
+                    }
+                });
+            }
+
+            // Override false-positive sharpness/blurry image failures for avatars and media (user-uploaded images are naturally compressed)
+            if (aiData.aesthetic_results) {
+                aiData.aesthetic_results.forEach(res => {
+                    const cat = res.category.toUpperCase();
+                    if ((cat.includes("AVATAR") || cat.includes("MEDIA") || cat.includes("D. AVATAR RENDERING") || cat.includes("E. MEDIA & IMAGES")) && res.status === 'FAIL') {
+                        const issueText = (res.issue || "").toLowerCase();
+                        if (issueText.includes('blurry') || issueText.includes('sharp') || issueText.includes('soft') || issueText.includes('fuzzy') || issueText.includes('resolution') || issueText.includes('fail_sharp')) {
+                            console.log(`[AIEngine] Overriding sharpness/blurry failure to PASS in ${res.category} (user-uploaded images are naturally compressed).`);
+                            res.status = 'PASS';
+                            res.issue = 'No visual defects detected (original user avatar image compression is expected)';
+                        }
+                    }
+                });
             }
             
             // Re-evaluate overall status if it was FAIL solely due to features/aesthetics we just passed or failed
@@ -699,20 +774,20 @@ class AIEngine {
                         const feedType = matchingFeed.feed_type || "";
                         const isManualReview = slug.includes("manual");
                         const isVideoFeed = feedType === "video_feed";
-                        
                         const hasSocialUrl = matchingFeed.review_url && 
                                              matchingFeed.review_url !== "N/A" && 
-                                             (matchingFeed.review_url.includes("facebook.com") || 
-                                              matchingFeed.review_url.includes("google.com") || 
-                                              matchingFeed.review_url.includes("instagram.com") ||
-                                              matchingFeed.review_url.includes("youtube.com") ||
-                                              matchingFeed.review_url.includes("twitter.com") ||
-                                              matchingFeed.review_url.includes("yelp.com"));
+                                             matchingFeed.review_url.trim().length > 0 &&
+                                             (matchingFeed.review_url.includes("://") || 
+                                              matchingFeed.review_url.includes("."));
+                        
+                        const iconUrl = matchingFeed.social_platform?.icon_full_url || matchingFeed.social_platform?.icon_url;
+                        const hasIconAsset = iconUrl && iconUrl !== "null" && iconUrl !== "N/A" && iconUrl.trim().length > 0;
 
                         hasNullData = (showIconConfig === "0") ||
                             (isManualReview && !hasSocialUrl) ||
                             isVideoFeed ||
-                            (!matchingFeed.social_platform && !matchingFeed.review_url);
+                            (!matchingFeed.social_platform && !matchingFeed.review_url) ||
+                            (matchingFeed.social_platform && !hasIconAsset);
                     } else if (isDateTrait) {
                         hasNullData = !matchingFeed.review_at;
                     } else if (trait.toLowerCase().replace(/ /g, "").includes("readmore")) {
@@ -731,17 +806,28 @@ class AIEngine {
                     const isAbsentInConfig = f.config_status === "Absent" || f.config_status?.includes("Absent");
 
                     if (isVisibleInUI && isAbsentInConfig) {
-                        console.log(`[AIEngine] 🚨 VISIBILITY VIOLATION FORCE-FAIL: ${trait} is Visible vs Config Absent.`);
+                        console.log(`[AIEngine] 🚨 VISIBILITY VIOLATION FORCE-FAIL: ${f.feature} is Visible vs Config Absent.`);
                         f.status = "FAIL";
-                        f.issue = `VIOLATION: ${trait} is VISIBLE in the UI review cards, but the widget configuration is set to ABSENT. This is a product regression. ${proofString}`;
+                        f.issue = `VIOLATION: ${f.feature} is VISIBLE in the UI review cards, but the widget configuration is set to ABSENT. This is a product regression. ${proofString}`;
+                    } else if (f.config_status === "Visible" && isVisibleInUI) {
+                        // If config expects Visible, and UI is Visible, then it is a PASS (no matter what the database value is)
+                        console.log(`[AIEngine] 🕵️ RASTER TRUTH: ${f.feature} is correctly Visible in UI per configuration.`);
+                        f.status = "PASS";
+                        f.issue = "No visual defects detected";
                     } else if (hasNullData) {
                         // Regular auto-heal for items that are absent as intended
                         if (f.status === "FAIL" && !isAbsentIssue) {
-                            console.log(`[AIEngine] 🛡️ Visibility Violation Detected for ${trait}. Preserving FAIL status.`);
-                            f.issue = `Icon VIOLATION: Platform icon is visible in UI despite configuration being OFF. ${proofString}`;
+                            console.log(`[AIEngine] 🛡️ Visibility Violation Detected for ${f.feature}. Preserving FAIL status.`);
+                            if (isRatingTrait) {
+                                f.issue = `Rating VIOLATION: Review rating/stars are visible in UI despite configuration being OFF or rating being 0/null in database. ${proofString}`;
+                            } else if (isIconTrait) {
+                                f.issue = `Icon VIOLATION: Platform icon is visible in UI despite configuration being OFF. ${proofString}`;
+                            } else {
+                                f.issue = `Visibility VIOLATION: ${f.feature} is visible in UI despite configuration being OFF. ${proofString}`;
+                            }
                         } else {
                             if (isVisibleInUI) {
-                                console.log(`[AIEngine] 🕵️ RASTER TRUTH: Data check confirms ${trait} should be Absent. Correcting UI Status.`);
+                                console.log(`[AIEngine] 🕵️ RASTER TRUTH: Data check confirms ${f.feature} should be Absent. Correcting UI Status.`);
                                 f.ui_status = "Absent";
                             }
                             f.status = "PASS";
@@ -877,6 +963,17 @@ class AIEngine {
                     });
                 }
                 aiData.overall_status = 'FAIL';
+            }
+        }
+
+        // Re-evaluate overall status one final time after all feature overrides, data-driven checks, and aesthetic cleanups
+        if (aiData.feature_results && aiData.aesthetic_results) {
+            const anyRemainingFeatureFail = aiData.feature_results.some(res => res.status === 'FAIL');
+            const anyAestheticFail = aiData.aesthetic_results.some(res => res.status === 'FAIL');
+            if (anyRemainingFeatureFail || anyAestheticFail) {
+                aiData.overall_status = 'FAIL';
+            } else {
+                aiData.overall_status = 'PASS';
             }
         }
 

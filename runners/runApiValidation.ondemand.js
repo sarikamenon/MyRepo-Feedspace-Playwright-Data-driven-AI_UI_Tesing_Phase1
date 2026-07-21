@@ -262,6 +262,15 @@ async function run() {
                     'Upgrade-Insecure-Requests': '1'
                 }
             });
+
+            // Add stealth initialization script to bypass bot checks (navigator.webdriver, chrome objects, languages)
+            await context.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            });
+
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
             helper.expectedType = typeName;
@@ -310,13 +319,22 @@ async function run() {
                 lastError = error.message;
                 console.error(`   > Attempt ${attempt} failed: ${error.message}`);
                 if (attempt >= maxAttempts) {
+                    const isFalseInvocation = lastError.includes('404') || 
+                                              lastError.includes('403') || 
+                                              lastError.includes('401') ||
+                                              lastError.includes('not found') || 
+                                              lastError.includes('Access denied');
                     results.push({
                         url,
                         widgetType: typeName,
-                        status: 'ERROR',
+                        status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR',
                         error: lastError,
                         timestamp: new Date().toISOString(),
-                        aiAnalysis: { message: 'Failed after 3 attempts: ' + lastError }
+                        aiAnalysis: { 
+                            overall_status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR',
+                            analysis_message: 'Failed after 3 attempts: ' + lastError,
+                            status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR'
+                        }
                     });
                 }
             } finally {

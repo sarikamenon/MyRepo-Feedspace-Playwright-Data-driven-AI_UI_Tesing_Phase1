@@ -60,6 +60,7 @@ const FEEDSPACE_SELECTORS = [
     '.feedspace-widget',
     '.feedspace-elements-wrapper',
     'iframe[src*="feedspace.io"]',
+    'iframe[srcdoc*="feedspace"]',
     'div[id*="feedspace"]',
     '[data-fs-processed]',
     // Narrowed attributes to prevent collisions with page builders
@@ -199,12 +200,15 @@ class PlaywrightHelper {
                         message: 'Skipped: Page not found (HTTP 404). Please verify the URL.'
                     };
                 }
-                if (status === 401 || status === 403) {
+                if (status === 401) {
                     return {
                         status: 'ACCESS_DENIED',
-                        error_code: status === 401 ? 'HTTP_401' : 'HTTP_403',
-                        message: `Skipped: Access denied (HTTP ${status}). The site is password-protected or restricted.`
+                        error_code: 'HTTP_401',
+                        message: `Skipped: Access denied (HTTP 401). The site is password-protected or restricted.`
                     };
+                }
+                if (status === 403) {
+                    console.log(`[Prevalidation] ⚠️ Received HTTP 403 (Forbidden) for ${url}. This might be Cloudflare bot protection. Proceeding with Playwright anyway.`);
                 }
                 if (status >= 500) {
                     lastError = {
@@ -216,9 +220,22 @@ class PlaywrightHelper {
                     // REACHABLE: Check if the widget is empty before returning REACHABLE
                     const html = response.data || '';
                     if (!widgetId && typeof html === 'string') {
-                        const dataIdMatch = html.match(/class=["']?[^"'>]*feedspace[^"'>]*["']?[^>]*data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i) ||
-                            html.match(/data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i) ||
+                        let dataIdMatch = html.match(/class=["']?[^"'>]*feedspace[^"'>]*["']?[^>]*data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i) ||
                             html.match(/unique_widget_id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/i);
+ 
+                        if (!dataIdMatch) {
+                            // Only match generic data-id if 'feedspace' is within 200 characters of the match
+                            const genericMatches = [...html.matchAll(/data-id=["']([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']/gi)];
+                            for (const match of genericMatches) {
+                                const index = match.index;
+                                const context = html.substring(Math.max(0, index - 200), Math.min(html.length, index + 200));
+                                if (context.toLowerCase().includes('feedspace')) {
+                                    dataIdMatch = match;
+                                    break;
+                                }
+                            }
+                        }
+ 
                         if (dataIdMatch) {
                             widgetId = dataIdMatch[1];
                         } else {
@@ -582,14 +599,24 @@ class PlaywrightHelper {
             // Check network state
             const networkHit = this.detectedNetworkTypes.size > 0;
 
-            // Check DOM state - must be actual script or an initialized widget container (having shadowRoot or children)
-            const scriptTag = await this.page.evaluate(() => {
-                const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"]');
-                const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
-                    return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
-                });
-                return hasScript || hasInitializedWidget;
-            }).catch(() => false);
+            // Check DOM state in all frames
+            let scriptTag = false;
+            for (const frame of this.page.frames()) {
+                try {
+                    if (frame.isDetached()) continue;
+                    const hasTag = await frame.evaluate(() => {
+                        const hasScript = !!document.querySelector('script[src*="feedspace.io"], iframe[src*="feedspace.io"], iframe[srcdoc*="feedspace"]');
+                        const hasInitializedWidget = Array.from(document.querySelectorAll('.feedspace-embed, [class*="feedspace-embed"]')).some(el => {
+                            return el.shadowRoot || el.children.length > 0 || el.getAttribute('data-fs-processed') === 'true' || el.getAttribute('data-status') === 'ready';
+                        });
+                        return hasScript || hasInitializedWidget;
+                    }).catch(() => false);
+                    if (hasTag) {
+                        scriptTag = true;
+                        break;
+                    }
+                } catch (e) {}
+            }
 
             if (networkHit || scriptTag) {
                 console.log(`[PlaywrightHelper] Feedspace signature detected (${networkHit ? 'Network' : 'DOM'}).`);
@@ -702,9 +729,21 @@ class PlaywrightHelper {
             // ── STEP 1: Wait for any widget marker ───────────────────────────
             let locatorFrame = this.page;
 
-            // If no Feedspace activity was seen during initialization, reduce wait time from 45s to 0s (skip wait)
+            // If no Feedspace activity was seen during initialization, fail with FALSE_INVOCATION
             const activityDetected = this.feedspaceActivitySeen || this.detectedNetworkTypes.size > 0;
-            const domWaitTimeout = activityDetected ? 45000 : 0;
+            if (!activityDetected) {
+                const reason = 'False invocation: Feedspace widget not embedded (No Feedspace script or network activity detected on the page)';
+                console.warn(`[PlaywrightHelper] 🛑 ${reason}`);
+                this.widgetType = 'Widget Not Found';
+                this.typeMatchResult = {
+                    expected: this.expectedType,
+                    detected: 'Widget Not Found',
+                    matched: false,
+                    reason: reason
+                };
+                return this._buildErrorResult(reason, 'FALSE_INVOCATION');
+            }
+            const domWaitTimeout = 45000;
 
             // Wait for selector in any frame
             const foundFrame = await this._waitForSelectorInAnyFrame(SELECTOR_STRING, domWaitTimeout);
@@ -1358,7 +1397,8 @@ class PlaywrightHelper {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding NOT FOUND in DOM.`);
                     this.geometricWarnings.push("DOM_TRUTH_BRANDING_ABSENT: Feedspace branding is absent from the DOM.");
                 }
-                if (isCardClipped) {
+                const skipVerticalClippingTypes = ['MARQUEE_UPDOWN', 'MASONRY', 'VERTICAL_SCROLL'];
+                if (isCardClipped && !skipVerticalClippingTypes.includes(normalizedType)) {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review cards are CLIPPED by ancestors.`);
                     this.geometricWarnings.push("DOM_TRUTH_CARD_CLIPPED: The review cards (boundary lines) are visually clipped/truncated at the bottom by parent webpage layout constraints (overflow: hidden). This means the boundary line of the card is missing/cut off in the UI.");
                 }
@@ -1886,6 +1926,9 @@ class PlaywrightHelper {
                 // GENERAL OVERLAY PROTECTION: Keep standard modal, tooltip, and popup elements (often appended directly to <body>)
                 // for all widgets so that page isolation doesn't hide overlays during clicks/interactions.
                 const overlaySels = [
+                    '[class*="feedspace"]', '[id*="feedspace"]',
+                    '[class^="fe-"]', '[class*=" fe-"]',
+                    '[id^="fe-"]', '[id*=" fe-"]',
                     '.fe-review-box', '.fe-modal-content', '[class*="review-box"]', '.feedspace-expanded-review',
                     '.fs-modal-overlay', '.fs-modal-inner', '.fs-modal-content', '.feedspace-review-card',
                     '.feedspace-avatar-tooltip', '[class*="tooltip"]', '.fe-tooltip',
@@ -1894,13 +1937,15 @@ class PlaywrightHelper {
                     '.feedspace-portrait', '[data-avatar-name]', '.feedspace-widget-close'
                 ];
                 overlaySels.forEach(sel => {
-                    document.querySelectorAll(sel).forEach(el => {
-                        let curr = el;
-                        while (curr) {
-                            keep.add(curr);
-                            curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
-                        }
-                    });
+                    try {
+                        document.querySelectorAll(sel).forEach(el => {
+                            let curr = el;
+                            while (curr) {
+                                keep.add(curr);
+                                curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
+                            }
+                        });
+                    } catch (e) { }
                 });
 
                 // Find targeted widget, falling back to all matching selectors if no target marked
@@ -1936,20 +1981,30 @@ class PlaywrightHelper {
 
                 pierceFind(document);
 
-                // Now hide everything else
+                // Keep all target elements and ancestors visible
+                keep.forEach(el => {
+                    if (el.style) {
+                        el.dataset.fsOriginalVisibility = el.style.visibility || 'visible';
+                        el.style.setProperty('visibility', 'visible', 'important');
+                    }
+                });
+
+                // Now hide everything else (by setting visibility: hidden, preserving layout dimensions)
                 const all = document.querySelectorAll('*');
                 all.forEach(el => {
                     if (!keep.has(el) &&
                         el.tagName !== 'HTML' &&
                         el.tagName !== 'BODY' &&
                         el.tagName !== 'HEAD' &&
+                        el.tagName !== 'LINK' && // Do NOT hide any <link> tag (stylesheets/fonts) anywhere!
+                        !document.head.contains(el) && // Do NOT hide anything inside <head> (stylesheets, link tags, etc.)
                         el.tagName !== 'SCRIPT' &&
                         el.tagName !== 'STYLE') {
 
                         const computedStyle = window.getComputedStyle(el);
-                        if (computedStyle.display !== 'none') {
-                            el.dataset.fsOriginalDisplay = el.style.display || 'block';
-                            el.style.setProperty('display', 'none', 'important');
+                        if (computedStyle.visibility !== 'hidden') {
+                            el.dataset.fsOriginalVisibility = el.style.visibility || 'visible';
+                            el.style.setProperty('visibility', 'hidden', 'important');
                         }
                     }
                 });
@@ -1966,6 +2021,12 @@ class PlaywrightHelper {
         try {
             console.log('[PlaywrightHelper] 🛡️  Restoring hidden page elements.');
             await this.page.evaluate(() => {
+                const hiddenVis = document.querySelectorAll('[data-fs-original-visibility]');
+                hiddenVis.forEach(el => {
+                    el.style.visibility = el.dataset.fsOriginalVisibility === 'visible' ? '' : el.dataset.fsOriginalVisibility;
+                    el.removeAttribute('data-fs-original-visibility');
+                });
+
                 const hidden = document.querySelectorAll('[data-fs-original-display]');
                 hidden.forEach(el => {
                     el.style.display = el.dataset.fsOriginalDisplay === 'block' ? '' : el.dataset.fsOriginalDisplay;

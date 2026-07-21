@@ -45,8 +45,8 @@ class CompanyLogoSliderHelper {
             console.log(`[LogoSliderHelper] Found ${count} unique logos.`);
             if (count === 0) throw new Error("No clickable logos found.");
 
-            // Target all unique logos (capped at 10 for performance, but satisfying 7+ requirement)
-            const targetIndices = Array.from({ length: Math.min(count, 10) }, (_, i) => i);
+            // Target all unique logos (capped at 20 for performance, ensuring we capture all reviews with social icons)
+            const targetIndices = Array.from({ length: Math.min(count, 20) }, (_, i) => i);
 
             for (const index of targetIndices) {
                 console.log(`[LogoSliderHelper] Clicking logo index ${index} (Edge Detection)...`);
@@ -57,7 +57,7 @@ class CompanyLogoSliderHelper {
                 await targetItem.click({ force: true, timeout: 5000 });
                 
                 // Stabilization wait (User confirmed popup opens on click)
-                await page.waitForTimeout(1500);
+                await page.waitForTimeout(1000);
 
                 // Capture state
                 console.log(`[LogoSliderHelper] Capturing state for logo index ${index}...`);

@@ -278,6 +278,15 @@ async function run() {
                     'Accept-Language': 'en-US,en;q=0.9'
                 }
             });
+
+            // Add stealth initialization script to bypass bot checks (navigator.webdriver, chrome objects, languages)
+            await context.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            });
+
             const page = await context.newPage();
             const helper = new PlaywrightHelper(page);
             helper.expectedType = typeName;
@@ -319,8 +328,22 @@ async function run() {
                 lastError = error.message;
                 console.error(`   > Attempt ${attempt} failed: ${error.message}`);
                 if (attempt >= maxAttempts) {
+                    const isFalseInvocation = lastError.includes('404') || 
+                                              lastError.includes('403') || 
+                                              lastError.includes('401') ||
+                                              lastError.includes('not found') || 
+                                              lastError.includes('Access denied');
                     const record = {
-                        url, widgetType: typeName, status: 'ERROR', error: lastError, timestamp: new Date().toISOString(), aiAnalysis: { message: 'Failed after 3 attempts: ' + lastError }
+                        url, 
+                        widgetType: typeName, 
+                        status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR', 
+                        error: lastError, 
+                        timestamp: new Date().toISOString(), 
+                        aiAnalysis: { 
+                            overall_status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR',
+                            analysis_message: 'Failed after 3 attempts: ' + lastError,
+                            status: isFalseInvocation ? 'FALSE_INVOCATION' : 'ERROR'
+                        }
                     };
                     results.push(record);
                 }
