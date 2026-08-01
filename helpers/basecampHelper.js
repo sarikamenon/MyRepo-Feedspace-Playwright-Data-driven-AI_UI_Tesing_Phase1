@@ -1,4 +1,5 @@
 const https = require("https");
+const BasecampCardHelper = require("./basecampCardHelper");
 
 class BasecampHelper {
     constructor() {
@@ -6,6 +7,7 @@ class BasecampHelper {
         this.accountId = (process.env.BASECAMP_ACCOUNT_ID || "").trim();
         this.projectId = (process.env.BASECAMP_PROJECT_ID || "").trim();
         this.chatId = (process.env.BASECAMP_CHAT_ID || "").trim();
+        this.cardHelper = new BasecampCardHelper();
     }
 
     async sendReport(summary) {
@@ -18,7 +20,7 @@ class BasecampHelper {
         const runUrl = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : "Local Run";
 
         let runDetails = "";
-        summary.runs.forEach(run => {
+        for (const run of summary.runs) {
             const statusEmoji = run.status === "PASS" ? "" : (run.status === "FAIL" ? "" : "⚠️ ");
             runDetails += `\n---\n`;
             runDetails += `website_url: "${run.url}"\n`;
@@ -50,7 +52,14 @@ class BasecampHelper {
             } else if (run.error) {
                 runDetails += `\nError: ${run.error}\n`;
             }
-        });
+
+            // Create/dedupe a Basecamp card for card-worthy results and
+            // surface the card link in the campfire message.
+            const card = await this.cardHelper.maybeCreateCard(run, runUrl);
+            if (card.cardUrl) {
+                runDetails += `📋 Card: ${card.cardUrl}\n`;
+            }
+        }
 
         const content = `
 Feedspace AI Visual Validation Report
