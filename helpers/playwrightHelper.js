@@ -126,16 +126,49 @@ class PlaywrightHelper {
             const pathSegments = pathname.split('/');
             const blockedPathSegments = [
                 'preview', 'editor', 'design', 'builder', 'admin',
-                'wp-admin', 'config'
+                'wp-admin', 'wp-login', 'wp-register', 'wp-signup', 'wp-activate',
+                'xmlrpc', 'wp-json', 'wp-cron', 'administrator', 'ghost',
+                'checkout', 'cart', 'my-account', 'account', 'config'
             ];
 
             if (pathSegments.some(segment => blockedPathSegments.includes(segment))) {
                 return true;
             }
 
-            // Other path-based checks (like wp-admin.php or sitebuilder filenames)
-            if (pathname.includes('wp-admin') || pathname.includes('sitebuilder')) {
+            // Other path-based checks (like wp-admin.php, wp-login.php, xmlrpc.php or sitebuilder filenames)
+            const blockedKeywords = [
+                'wp-admin', 'wp-login', 'wp-register', 'wp-signup', 'wp-activate',
+                'xmlrpc', 'wp-json', 'wp-cron', 'administrator', 'ghost',
+                'checkout', 'cart', 'my-account', 'sitebuilder'
+            ];
+            if (blockedKeywords.some(keyword => pathname.includes(keyword))) {
                 return true;
+            }
+
+            // Check query parameters for restricted page redirections
+            for (const [key, value] of url.searchParams.entries()) {
+                if (value) {
+                    const lowerVal = value.toLowerCase().trim();
+                    let targetPath = '';
+                    if (/^https?:\/\//i.test(lowerVal)) {
+                        try {
+                            const parsedTarget = new URL(lowerVal);
+                            targetPath = parsedTarget.pathname;
+                        } catch (e) {}
+                    } else {
+                        targetPath = lowerVal.startsWith('/') ? lowerVal : '/' + lowerVal;
+                    }
+
+                    if (targetPath) {
+                        const targetSegments = targetPath.split('/');
+                        if (
+                            targetSegments.some(segment => blockedPathSegments.includes(segment)) ||
+                            blockedKeywords.some(keyword => targetPath.includes(keyword))
+                        ) {
+                            return true;
+                        }
+                    }
+                }
             }
 
         } catch (e) {
@@ -146,7 +179,9 @@ class PlaywrightHelper {
 
             const blockedKeywords = [
                 'preview', 'editor', 'design', 'builder', 'sitebuilder',
-                'admin', 'wp-admin', 'config'
+                'admin', 'wp-admin', 'wp-login', 'wp-register', 'wp-signup',
+                'wp-activate', 'xmlrpc', 'wp-json', 'wp-cron', 'administrator',
+                'ghost', 'checkout', 'cart', 'my-account', 'account', 'config'
             ];
             for (const keyword of blockedKeywords) {
                 const regex = new RegExp(`\\b${keyword}\\b`, 'i');
