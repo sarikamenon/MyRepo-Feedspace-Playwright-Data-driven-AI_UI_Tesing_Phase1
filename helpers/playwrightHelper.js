@@ -139,7 +139,7 @@ class PlaywrightHelper {
             const blockedKeywords = [
                 'wp-admin', 'wp-login', 'wp-register', 'wp-signup', 'wp-activate',
                 'xmlrpc', 'wp-json', 'wp-cron', 'administrator', 'ghost',
-                'checkout', 'cart', 'my-account', 'sitebuilder'
+                'sitebuilder'
             ];
             if (blockedKeywords.some(keyword => pathname.includes(keyword))) {
                 return true;
