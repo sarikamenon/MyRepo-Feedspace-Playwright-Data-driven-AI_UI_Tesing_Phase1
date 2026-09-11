@@ -6,8 +6,11 @@
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
+    "popover_only_features": [
+        "Feedspace Branding"
+    ],
     "commented_features": [],
-    "surface_note": "No grid and no card surface: the review sits directly on the page.",
+    "surface_note": "No grid and no card surface: the review sits directly on the page. Clicking a review opens a modal, the only place the Feedspace branding pill appears.",
     "unsupported_features": [
         "Review Card Border & Shadow"
     ]

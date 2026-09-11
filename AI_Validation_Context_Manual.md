@@ -40,7 +40,9 @@ everything below it. See `qa-automation-improvement-10-09-2026.md`.
 - **Result**: This triggers a **FAIL** (Configuration mismatch), ensuring we detect rendering bugs where the backend thinks something is on-screen but it is actually missing or broken.
 - ⚠️ **Scope limit**: this applies only to features the widget renders on the captured surface. A
   popover-only feature with no popover screenshot is **NOT_APPLICABLE**, never a FAIL, and a per-review
-  feature on an `aggregate_surface` widget is not looked for on the resting state at all.
+  feature on an `aggregate_surface` widget is not looked for on the resting state at all. The DOM sniff
+  reads only the resting surface, so it never judges a popover-only feature either: the Review Badge's
+  and the Cross Slider's branding pills live in their modals, and the sniff used to declare them absent.
 
 ### D. Resolved Config Defaults
 
@@ -80,8 +82,10 @@ everything below it. See `qa-automation-improvement-10-09-2026.md`.
    what it renders, what is popover-only, and what it cannot do at all.
 4. **Playwright Helper**: Navigates to the site and captures the **DOM Truth** (Geometric Warnings),
    splitting them into authoritative facts and `ADVISORY:` measurements.
-5. **Widget Helper**: Interacts with the slider/marquee and captures **High-Res Snapshots**, freezing
-   motion first where the widget animates.
+5. **Widget Helper**: Interacts with the widget and captures **High-Res Snapshots**, freezing motion
+   first where the widget animates. Helpers also open what the resting surface hides (the Floating
+   Badge panel, the Review Badge modal, avatar popovers), which is the only way a popover-only feature
+   is judged instead of reported `NOT_APPLICABLE`.
 6. **Prompt Builder**: Merges **Capability**, **DOM Truth (Section -1)**, **Backend Data (Section 0)** and
    the resolved **Config Status** into the AI instruction set.
 7. **AI Engine**: Sends the prompt and snapshots to Gemini, applies the **Forensic Rules** (21, 26, 27) and

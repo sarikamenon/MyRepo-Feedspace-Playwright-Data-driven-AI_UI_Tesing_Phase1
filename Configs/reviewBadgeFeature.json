@@ -1,7 +1,7 @@
 {
     "widget_type": "REVIEW_BADGE",
     "aggregate_surface": true,
-    "surface_note": "A wrapping row of cards, ONE PER REVIEW SOURCE, not one per review. Each card carries a platform logo, a label, a score with stars, and a review count. No individual review is rendered on the resting surface. Card Layout has a surface and a score numeral; Award Layout has neither, no platform logo and no rating chip, and its stars carry the rating alone.",
+    "surface_note": "A wrapping row of cards, ONE PER REVIEW SOURCE, not one per review. Each card carries a platform logo, a label, a score with stars, and a review count. No individual review is rendered on the resting surface. Card Layout has a surface and a score numeral; Award Layout has neither, no platform logo and no rating chip, and its stars carry the rating alone. Clicking a card opens a review modal (one review at a time, prev/next navigation, and the Feedspace branding pill), which is the only place review dates, Read More and branding appear.",
     "features": [
         "Show Review Ratings",
         "Show Social Platform Icon",
@@ -11,7 +11,8 @@
     ],
     "popover_only_features": [
         "Show Review Date",
-        "Read More"
+        "Read More",
+        "Feedspace Branding"
     ],
     "unsupported_features": [
         "Inline CTA",

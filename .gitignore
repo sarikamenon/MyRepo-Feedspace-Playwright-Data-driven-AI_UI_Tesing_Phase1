@@ -24,6 +24,7 @@ tmp/
 # Environment files
 .env
 .env.*
+!.env.example
 
 # IDE / OS
 .vscode/

@@ -234,5 +234,17 @@ for (const typeName of Object.values(WidgetTypeConstants)) {
     );
 }
 
+console.log('\nEvery widget with popover-only features dispatches an interaction helper:');
+const dispatchSource = fs.readFileSync(path.join(__dirname, '..', 'helpers', 'playwrightHelper.js'), 'utf8');
+for (const typeName of new Set(Object.values(WidgetTypeConstants))) {
+    const popoverOnly = WidgetConfigLoader.popoverOnlyFeatures(typeName);
+    if (popoverOnly.length === 0) continue;
+    check(
+        `${typeName}: playwrightHelper dispatches a helper to open its popover`,
+        dispatchSource.includes(`normalizedType === '${typeName}'`),
+        `${popoverOnly.join(', ')} are popover-only, but no helper branch exists for ${typeName}, so they can only ever be NOT_APPLICABLE.`
+    );
+}
+
 console.log(`\n${results.passed} passed, ${results.failed} failed\n`);
 process.exit(results.failed > 0 ? 1 : 0);

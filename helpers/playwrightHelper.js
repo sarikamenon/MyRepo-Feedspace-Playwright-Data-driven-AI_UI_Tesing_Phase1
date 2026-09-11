@@ -12,6 +12,7 @@ const ReportHelper = require('./reportHelper');
 const { WidgetDetector } = require('./widgetDetector');
 const WidgetConfigLoader = require('./widgetConfigLoader');
 const { isEmptyWidgetData } = require('./widgetData');
+const { MAX_IMAGES } = require('./imageBudget');
 
 const AvatarGroupHelper = require('./interactiveWidgets/avatarGroupHelper');
 const AvatarCarouselHelper = require('./interactiveWidgets/avatarCarouselHelper');
@@ -25,6 +26,8 @@ const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper'
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
 const MasonryHelper = require('./interactiveWidgets/masonryHelper');
 const AvatarBlockHelper = require('./interactiveWidgets/avatarBlockHelper');
+const FloatingBadgeHelper = require('./interactiveWidgets/floatingBadgeHelper');
+const ReviewBadgeHelper = require('./interactiveWidgets/reviewBadgeHelper');
 
 const MAX_SCREENSHOT_HEIGHT = 10000;
 
@@ -1408,11 +1411,20 @@ class PlaywrightHelper {
                     }
                 }
 
-                if (domTruth.iconsFound) {
+                // The resting-surface sniff cannot vouch for a feature the widget renders only in a popover,
+                // or not at all: the Floating Badge bar's logo is not a per-review icon.
+                const offSurface = feature => ['popoverOnlyFeatures', 'unsupportedFeatures']
+                    .some(fn => WidgetConfigLoader[fn](normalizedType).includes(feature));
+                if (domTruth.iconsFound && !offSurface('Show Social Platform Icon')) {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
-                    this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
+                    this.geometricWarnings.push("DOM_TRUTH_ICONS_PRESENT: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
-                if (domTruth.brandingFound) {
+                // Branding a widget renders only in a popover, or not at all, cannot be judged from the
+                // resting DOM. Declaring it absent here forced a FAIL on every badge widget.
+                const brandingOffSurface = offSurface('Feedspace Branding');
+                if (brandingOffSurface) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding is not on the resting surface of ${normalizedType} by design; not judged from the DOM.`);
+                } else if (domTruth.brandingFound) {
                     if (isBrandingClipped) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding is CLIPPED by ancestors.`);
                         this.geometricWarnings.push("DOM_TRUTH_BRANDING_ABSENT: Feedspace branding is present in the DOM but visually clipped/truncated by the parent webpage layout constraints.");
@@ -1430,8 +1442,18 @@ class PlaywrightHelper {
                     this.geometricWarnings.push("DOM_TRUTH_CARD_CLIPPED: The review cards (boundary lines) are visually clipped/truncated at the bottom by parent webpage layout constraints (overflow: hidden). This means the boundary line of the card is missing/cut off in the UI.");
                 }
 
-                if (!domTruth.starsFound && domTruth.itemCount > 0) {
-                    if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)) {
+                // Stars prove per-review ratings only where nothing else on the resting surface carries a
+                // star row: not a popover-only widget (its stars live in the popup), not an aggregate surface
+                // (the badges), and not Reviews & Ratings, whose summary aside has its own star row.
+                const starsInPopover = ['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)
+                    || WidgetConfigLoader.popoverOnlyFeatures(normalizedType).includes('Show Review Ratings');
+                const starsProveReviews = !starsInPopover && !offSurface('Show Review Ratings')
+                    && !WidgetConfigLoader.isAggregateSurface(normalizedType) && normalizedType !== 'REVIEW_AND_RATINGS';
+                if (domTruth.starsFound && domTruth.itemCount > 0 && starsProveReviews) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings DETECTED on the review cards.`);
+                    this.geometricWarnings.push("DOM_TRUTH_RATINGS_PRESENT: Review Ratings (Stars) ARE present on the review cards.");
+                } else if (!domTruth.starsFound && domTruth.itemCount > 0) {
+                    if (starsInPopover) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND on base widget. AI must check expanded popups.`);
                         this.geometricWarnings.push(`DOM_TRUTH: Base widget has no stars. For ${normalizedType}, stars are inside the expanded review popups. Check the popup screenshots to confirm.`);
                     } else {
@@ -1657,18 +1679,13 @@ class PlaywrightHelper {
             await this._handleLoadMoreLoop(interactionContext, screenshotBuffers);
 
             if (normalizedType === 'AVATAR_GROUP') {
+                // The screenshots left in the engine's budget after the viewport shot (STEP 8) and any
+                // branding shot (STEP 7.5) taken below, so the helper opens only popups the model will
+                // see. (The capture callback that sat here was never read by the helper.)
+                const trailingShots = 1 + (domTruth.brandingFound ? 1 : 0);
                 const shots = await AvatarGroupHelper.interact(
                     interactionContext, locator, this.geometricWarnings,
-                    async () => {
-                        const popup = interactionContext
-                            .locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"], .feedspace-avatar-tooltip, [class*="tooltip"], .fe-tooltip')
-                            .filter({ visible: true })
-                            .first();
-                        if (await popup.isVisible()) return await popup.screenshot({ animations: 'disabled' });
-                        return !this.page.isClosed()
-                            ? await this.page.screenshot({ fullPage: false, animations: 'disabled' })
-                            : null;
-                    }
+                    MAX_IMAGES - screenshotBuffers.length - trailingShots
                 );
                 if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
 
@@ -1726,6 +1743,12 @@ class PlaywrightHelper {
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
             } else if (normalizedType === 'AVATAR_BLOCK') {
                 const shots = await AvatarBlockHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+            } else if (normalizedType === 'FLOATING_BADGE') {
+                const shots = await FloatingBadgeHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+            } else if (normalizedType === 'REVIEW_BADGE') {
+                const shots = await ReviewBadgeHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
             }
 

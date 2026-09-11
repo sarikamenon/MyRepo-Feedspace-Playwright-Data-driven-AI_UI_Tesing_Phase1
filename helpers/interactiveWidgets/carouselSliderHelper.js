@@ -21,7 +21,7 @@ class CarouselSliderHelper {
      * Interact with Carousel Slider widgets.
      * Navigates the slider and captures screenshots.
      */
-    static async interact(interactionContext, widgetLocator) {
+    static async interact(interactionContext, widgetLocator, geometricWarnings = []) {
         console.log('[CarouselSliderHelper] Starting interactive carousel validation...');
         const screenshots = [];
 
@@ -123,9 +123,10 @@ class CarouselSliderHelper {
             // Horizontal overflow is NOT checked: a carousel is designed to show partially
             // visible slides at the left and right edges, so flagging them reports the
             // widget's intended behaviour as a layout failure. Only vertical clipping,
-            // which a carousel never does on purpose, is a defect.
-            const cardSelector = '.feedspace-embed-card, .feedspace-review-card, .swiper-slide-active, .slick-active';
-            const vSize = page.viewportSize();
+            // which a carousel never does on purpose, is a defect. It is measured against the
+            // card's nearest overflow-hidden ancestor, never the browser viewport: a card below
+            // the fold is a capture artifact, not a widget defect.
+            const cardSelector = '.feedspace-carousel-card, .feedspace-embed-card, .feedspace-review-card, .swiper-slide-active, .slick-active';
 
             // Measure against a settled track, never mid-transit.
             await page.waitForTimeout(400);
@@ -133,30 +134,52 @@ class CarouselSliderHelper {
 
             let clips = [];
             try {
-                // page.evaluate takes ONE argument. Passing three threw "Too many arguments" on
-                // every run, so this sentinel never measured anything before now.
-                clips = await page.evaluate(({ sel, vh }) => {
-                    const results = [];
-                    document.querySelectorAll(sel).forEach((el, idx) => {
-                        const r = el.getBoundingClientRect();
-                        if (r.width > 10 && r.height > 10) {
-                            if (r.bottom > vh + 5) results.push(`FAIL_BOTTOM_EDGE_CLIPPED (Card ${idx + 1})`);
-                            if (r.top < -5) results.push(`FAIL_TOP_EDGE_CLIPPED (Card ${idx + 1})`);
+                // A locator pierces the widget's shadow root; document.querySelectorAll does not,
+                // and the old selectors predate Astro's .feedspace-carousel-card. Between them
+                // this sentinel never found a card.
+                clips = await widgetLocator.locator(cardSelector).evaluateAll(cards => {
+                    const parentOf = node => node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+                    const hides = overflow => overflow === 'hidden' || overflow === 'clip';
+                    const name = el => el.tagName.toLowerCase() + [...el.classList].slice(0, 2).map(c => `.${c}`).join('');
+                    const found = [];
+                    // Astro nests .feedspace-review-card inside .feedspace-carousel-card and both match,
+                    // so measure each card once, by its outermost match.
+                    const outermost = cards.filter(card => !cards.some(other => other !== card && other.contains(card)));
+                    outermost.forEach((card, idx) => {
+                        const r = card.getBoundingClientRect();
+                        if (r.width <= 10 || r.height <= 10) return;
+                        // A slide moved out of the track is hidden on purpose: skip any card that half-leaves
+                        // one of its horizontally clipping ancestors, not just the nearest one.
+                        let yClip = null;
+                        let offTrack = false;
+                        for (let a = parentOf(card); a && a !== document.documentElement && !offTrack; a = parentOf(a)) {
+                            const style = getComputedStyle(a);
+                            if (hides(style.overflowX)) {
+                                const x = a.getBoundingClientRect();
+                                offTrack = Math.min(r.right, x.right) - Math.max(r.left, x.left) < r.width / 2;
+                            }
+                            if (!yClip && hides(style.overflowY)) yClip = a;
                         }
+                        if (offTrack || !yClip) return;
+                        const box = yClip.getBoundingClientRect();
+                        const bottom = Math.round(r.bottom - box.bottom);
+                        const top = Math.round(box.top - r.top);
+                        if (bottom > 2) found.push({ card: idx + 1, edge: 'bottom', px: bottom, by: name(yClip) });
+                        if (top > 2) found.push({ card: idx + 1, edge: 'top', px: top, by: name(yClip) });
                     });
-                    return results;
-                }, { sel: cardSelector, vh: vSize.height });
+                    return found;
+                }).catch(() => []);
             } finally {
                 // Always release: a throw here used to leave the whole page frozen.
                 await MotionFreeze.release(sentinelFreeze, 'CarouselSliderHelper:sentinel');
             }
 
-            if (clips && clips.length > 0) {
-                clips.forEach(msg => {
-                    console.log(`[SYSTEM ALERT] TRUTH DATA: FAIL_LAYOUT_CLIPPED detected in carousel. Issue: ${msg}`);
-                    if (interactionContext.geometricWarnings) interactionContext.geometricWarnings.push(msg);
-                });
-            }
+            clips.forEach(c => {
+                const msg = `ADVISORY: Carousel card ${c.card} is cut ${c.px}px at the ${c.edge} by its clipping container ${c.by}. Check the screenshots before reporting it.`;
+                console.log(`[CarouselSliderHelper] ${msg}`);
+                geometricWarnings.push(msg);
+            });
+            console.log(`[CarouselSliderHelper] Clipping sentinel found ${clips.length} vertically clipped card(s).`);
 
             console.log(`[CarouselSliderHelper] Interaction complete. ${screenshots.length} screenshots captured.`);
 

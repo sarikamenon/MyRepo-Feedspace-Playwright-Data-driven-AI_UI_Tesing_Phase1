@@ -1,9 +1,10 @@
 /**
  * False-positive regression corpus.
  *
- * Every case is taken from a real [Widget FAIL] card that reached Done on the
- * Feedspace.io board and was triaged by a human as "the widget is fine, the checker
- * is wrong". Each asserts that the framework no longer manufactures that failure.
+ * Every case is taken from a real false FAIL: a [Widget FAIL] card that reached Done on
+ * the Feedspace.io board and was triaged by a human as "the widget is fine, the checker
+ * is wrong", or a verdict from a real-Gemini sample run that was checked the same way.
+ * Each asserts that the framework no longer manufactures that failure.
  *
  * Run: node tests/falsePositiveRegression.test.js
  *
@@ -153,6 +154,14 @@ console.log('\nCards 10206673133 / 10207208742 - avatar and video thumbnail "blu
         promptSrc.includes('VIDEO THUMBNAIL'),
         'poster frames are compressed stills and are expected to be softer'
     );
+    // Real-Gemini run 11-09-2026 (S-5): three more copies of the same rule were still live.
+    for (const [rule, text] of [
+        ["the avatar audit's RAZOR COMPARISON", 'benchmark the avatar pixels against the razor-sharp vector text'],
+        ['its edge-width FAIL trigger', 'Avatar Edge Width > Text Edge Width'],
+        ['the central-review ZERO TOLERANCE rule', 'Benchmark the image texture against the text']
+    ]) {
+        check(`${rule} is gone`, !promptSrc.includes(text), 'a photo always has wider edges than 1px vector text, so this failed sharp avatars');
+    }
 }
 
 // ── Cards 10224702609 and 10246278068: popover clipped at the capture boundary ──
@@ -257,6 +266,138 @@ console.log('\nCard 10180368782 - expected FLOATING_TOAST, page embeds SINGLE_SL
         'an unsupported widget type files no card at all',
         classify.classify({ status: 'SKIPPED', error: 'Coverage Gap: widget type ID 20 has no detector entry or capability config. Not validated.' }) === null,
         'a coverage gap is not a product defect'
+    );
+}
+
+// ── Real-Gemini sample run, 11-09-2026: false FAILs caught before they reached a card ──
+console.log('\nReal-Gemini run 11-09-2026 - FLOATING_BADGE, "the bar overlaps the review panel":');
+{
+    const prompt = buildPrompt('FLOATING_BADGE', 'floatingBadgeFeature', {});
+    check(
+        'the prompt says a card cut where the list meets the bar is scrolled, not covered',
+        prompt.includes('SCROLL EDGE IS NOT OVERLAP'),
+        'both real runs failed up to six categories on the list scroll edge'
+    );
+
+    const FloatingBadgeHelper = require('../helpers/interactiveWidgets/floatingBadgeHelper');
+    const fact = typeof FloatingBadgeHelper._scrollEdgeFact === 'function'
+        ? FloatingBadgeHelper._scrollEdgeFact({ scrollHeight: 1813, clientHeight: 520 }, [
+            ['the first open-panel screenshot', ['DIXIT DONDA']],
+            ['the scrolled screenshot', ['JOHN CUTLER', 'PARTIAL FAIL_ZONE']]
+        ])
+        : '';
+    check('the helper states the measured scroll edge as a DOM fact', fact.startsWith('DOM_TRUTH_PANEL_SCROLL_EDGE'));
+    check(
+        'it names the card each screenshot cuts, which the model otherwise called truncated',
+        fact.includes('Dixit Donda in the first open-panel screenshot'),
+        `fact was: ${fact.slice(0, 160)}`
+    );
+    check(
+        'an all-caps reviewer name cannot trip the forced-FAIL filter',
+        !['FAIL_', '_EDGE_CLIPPED', 'PARTIAL', 'CUT'].some(t => fact.includes(t)),
+        `fact was: ${fact.slice(0, 160)}`
+    );
+}
+
+console.log('\nReal-Gemini run 11-09-2026 - CROSS_SLIDER, "Feedspace Branding absent":');
+{
+    const prompt = buildPrompt('CROSS_SLIDER', 'crossSliderFeature', {});
+    const line = prompt.split('\n').find(l => l.startsWith('- **Feedspace Branding**') && l.includes('Config Status')) || '';
+    check('branding is popover-only for the cross slider', line.includes('POPOVER-ONLY'), `line was: ${line}`);
+
+    const start = prompt.indexOf('**RULE 16: BRANDING');
+    const rule16 = start === -1 ? '' : prompt.slice(start, prompt.indexOf('**RULE 17', start));
+    check(
+        "RULE 16 recognises the shipped pill's resting text",
+        rule16.includes('Want to create your widget?'),
+        'the model rejected the real pill because RULE 16 demanded the old wording'
+    );
+
+    const promptSrc = fs.readFileSync(path.join(process.cwd(), 'helpers/promptBuilder.js'), 'utf8');
+    check(
+        'no widget block still describes the branding as only the old lightning-bolt pill',
+        !promptSrc.includes("It is a white pill with 'Capture reviews with Feedspace'"),
+        'the Avatar Blocks note repeated the old signature'
+    );
+}
+
+console.log('\nReal-Gemini run 11-09-2026 - AVATAR_GROUP, authored ellipsis and screenshots never sent:');
+{
+    const { MAX_IMAGES } = require('../helpers/imageBudget');
+    const AvatarGroupHelper = require('../helpers/interactiveWidgets/avatarGroupHelper');
+    const config = { widget_customization: {}, feeds_data: [{ id: 1, app_user_name: 'Test User', rating: 5, comment: 'Great' }] };
+    const prompt = PromptBuilder.build('AVATAR_GROUP', config, featuresFor('avatarGroupFeature'), true, [], MAX_IMAGES);
+    check(
+        'the prompt says how many screenshots were sent',
+        prompt.includes(`exactly ${MAX_IMAGES} screenshots, part1 to part${MAX_IMAGES}`),
+        'the model claimed 42 screenshots when 14 were sent, and cited ones it never received'
+    );
+    check('and no longer hardcodes a range', !prompt.includes('Part 1 to Part 14'), 'the range must follow the count actually sent');
+    check(
+        'an ellipsis in text the DOM shows in full is not truncation',
+        prompt.includes('**AUTHORED ELLIPSIS**'),
+        'a review whose source text ends in "..." failed as truncated and for a missing Read More'
+    );
+
+    const fact = AvatarGroupHelper._endTextFact('Ayush', 'at an amazing pace...', true);
+    check(
+        "the popup fact quotes the review text and calls its ellipsis the review's own",
+        fact.includes('"at an amazing pace..."') && fact.includes('part of the review text itself'),
+        `fact was: ${fact}`
+    );
+    const clamped = AvatarGroupHelper._endTextFact('Ayush', 'at an amazing pace...', false);
+    check('a clamped popup gets no such note', !clamped.includes('in full') && !clamped.includes('review text itself'), `fact was: ${clamped}`);
+    check(
+        'the review text selector no longer matches any class containing "text"',
+        AvatarGroupHelper.REVIEW_TEXT.includes('.feedspace-review-text') && !AvatarGroupHelper.REVIEW_TEXT.includes('[class*="text"]'),
+        'it matched the name element, so every DOM_END_TEXT fact quoted the reviewer name'
+    );
+    const loud = AvatarGroupHelper._endTextFact('JOHN CUTLER', 'A PARTIAL FAIL_ZONE CUT', true);
+    check(
+        'quoted names and review words cannot trip the forced-FAIL filter',
+        !['FAIL_', '_EDGE_CLIPPED', 'PARTIAL', 'CUT'].some(t => loud.includes(t)),
+        `fact was: ${loud}`
+    );
+    const twoLine = AvatarGroupHelper._endTextFact('Sean Lues\nManaging Director at Journeys Worldwide', 'on board as well.', true);
+    check(
+        'a name element that also holds the role gives a one-line fact naming only the reviewer',
+        !twoLine.includes('\n') && twoLine.includes('for Sean Lues is') && !twoLine.includes('Managing Director'),
+        `fact was: ${twoLine}`
+    );
+    const icons = AvatarGroupHelper._popupIconsFact(['Ayush', 'JOHN CUTLER'], ['Candida Bradley']);
+    check(
+        'the popup icon fact uses its token, names who shows an icon, and cannot trip the forced-FAIL filter',
+        icons.startsWith('DOM_TRUTH_POPUP_ICONS_PRESENT') && icons.includes('for: Ayush') && !['FAIL_', '_EDGE_CLIPPED', 'PARTIAL', 'CUT'].some(t => icons.includes(t)),
+        `fact was: ${icons}`
+    );
+    check(
+        'the Read More fact uses the token the engine honours',
+        AvatarGroupHelper._readMoreFact(6).startsWith('DOM_TRUTH_READ_MORE_NOT_NEEDED'),
+        AvatarGroupHelper._readMoreFact(6)
+    );
+
+    const engineSrc = fs.readFileSync(path.join(process.cwd(), 'helpers/aiEngine.js'), 'utf8');
+    const helperSrc = fs.readFileSync(path.join(process.cwd(), 'helpers/interactiveWidgets/avatarGroupHelper.js'), 'utf8');
+    check(
+        'the engine trims to the shared budget, not a literal',
+        engineSrc.includes('buffers.slice(0, MAX_IMAGES)') && !engineSrc.includes('slice(0, 14)'),
+        'the helper and the engine must agree on how many screenshots reach the model'
+    );
+    check(
+        'the Avatar Group helper stops opening popups when that budget is full',
+        helperSrc.includes('screenshotBuffers.length + 2 > maxShots'),
+        'popups past the budget were opened and described, but never sent'
+    );
+    const pwSrc = fs.readFileSync(path.join(process.cwd(), 'helpers/playwrightHelper.js'), 'utf8');
+    check(
+        'and its budget leaves room for the viewport and branding shots taken after it',
+        pwSrc.includes('MAX_IMAGES - screenshotBuffers.length - trailingShots'),
+        'the final viewport shot, and the branding shot RULE 16 reads, were trimmed as the 15th image'
+    );
+    check(
+        "the helper waits for a popup's images before capturing it",
+        helperSrc.includes("img.addEventListener('load'"),
+        'the source icon is a lazy image, and one capture was taken before it loaded'
     );
 }
 

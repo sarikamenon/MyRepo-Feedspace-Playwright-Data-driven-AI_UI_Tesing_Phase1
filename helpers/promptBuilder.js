@@ -3,7 +3,7 @@ const path = require('path');
 const WidgetConfigLoader = require('./widgetConfigLoader');
 
 class PromptBuilder {
-  static build(widgetType, config, staticFeatures, isMultiImage = false, geometricWarnings = []) {
+  static build(widgetType, config, staticFeatures, isMultiImage = false, geometricWarnings = [], imageCount = 0) {
     const featureMap = {
       "Left & Right Buttons": "is_show_arrows_buttons",
       "Left & Right Shift Buttons": "is_show_arrows_buttons",
@@ -379,8 +379,8 @@ ${isMultiImage ? `
 ============================================================
 🚨 RULE 17: STORYBOARD AUDIT (EXHAUSTIVE MANDATE) 🚨
 ============================================================
-- **MANDATORY PANNED REVIEW**: You are FORBIDDEN from reporting a "Wholesale Pass". You MUST zoom and pan across EVERY screenshot (Part 1 to Part 14).
-- **ANY-CARD PRIORITY MANDATE (IRON LOCK)**: If you see a feature (Stars, Social Icon, Read More, Date) on **ANY** single card in **ANY** screenshot, you MUST report that feature as **Visible**.
+- **MANDATORY PANNED REVIEW**: You are FORBIDDEN from reporting a "Wholesale Pass". You MUST zoom and pan across EVERY screenshot${imageCount ? ` (part1 to part${imageCount})` : ''}.
+${imageCount ? `- **SCREENSHOT COUNT**: You received exactly ${imageCount} screenshots, part1 to part${imageCount}, in the order sent. There is no part${imageCount + 1}: never cite one. A DOM fact or SECTION 0 record about a review that none of these screenshots shows is not evidence of anything visible, so report no defect for it.\n` : ''}- **ANY-CARD PRIORITY MANDATE (IRON LOCK)**: If you see a feature (Stars, Social Icon, Read More, Date) on **ANY** single card in **ANY** screenshot, you MUST report that feature as **Visible**.
 - **DATA-DRIVEN FALLBACK**: You are ONLY permitted to apply "Data-Driven Pass" logic (e.g., Rule 12.A, 13.A) if **NONE** of the cards in the entire storyboard show the feature physically in their pixels.
 - **UNIVERSAL AUDIT**: If even ONE card in ONE image shows a defect (Blur, Clipping, Truncation), the entire Category MUST be marked as **FAIL**.
 - **THE WEAKEST LINK**: A single blurry card (any pixelated or low-quality artifact) kills the PASS for the entire widget.
@@ -595,12 +595,12 @@ ${isMultiImage ? `
 - **Triggers**: Category B (Element Containment).
 
 **RULE 16: BRANDING & LOGO AUDIT**
-- **SIGNATURE**: A small white pill-shaped badge (button) with a black border containing the text "Capture reviews with Feedspace" or "Feedspace" and a **yellow lightning bolt (⚡) logo**.
+- **SIGNATURE**: A small rounded pill with a thin border (light or dark fill, following the theme) that at rest reads **"Want to create your widget?"**, with no icon. On hover it becomes "Powered by **Feedspace**" with a lightning bolt, but screenshots are taken at rest, so expect the "Want to create your widget?" text. Masonry's inline branding card, and older embeds, read "Capture reviews with Feedspace" (or just "Feedspace") with a yellow lightning bolt (⚡). Any one of these is the Feedspace branding: do not demand the bolt or one particular wording.
 - **DOM_TRUTH**: If Section -1 shows detection, you MUST report Visible. Check the dedicated branding screenshot if it is not visible in the main grid.
 - **LOCATION**: Usually at the **Bottom-Right** or Bottom-Center of the widget grid, often sitting just below the last row of avatars. 
 - **CROSS SLIDER EXCEPTION**: For popups like Cross Slider, Feedspace branding will be displayed directly below the opened popup card.
 - **MANDATORY SCAN**: Scan the **entire right edge** and bottom of EVERY screenshot.
-- **WIDGET OWNERSHIP MANDATE (CRITICAL)**: The "Capture reviews with Feedspace" pill ALWAYS belongs to the widget, even if it appears to be sitting outside the card grid. If you see it ANYWHERE in the screenshot, you MUST report it as **Visible**.
+- **WIDGET OWNERSHIP MANDATE (CRITICAL)**: The branding pill (any wording listed under SIGNATURE) ALWAYS belongs to the widget, even if it appears to be sitting outside the card grid. If you see it ANYWHERE in the screenshot, you MUST report it as **Visible**.
 - **MULTI-SCREENSHOT MANDATE (CRITICAL)**: You MUST check EVERY provided screenshot (including the initial grid/part1.png and all popups). If branding is visible on ANY of them, you MUST report it as **Visible**. Do NOT report Absent just because it is missing from the popups if it is visible on the main grid.
 - **OFF-CARD EXCEPTION (CRITICAL)**: The branding pill is INTENTIONALLY placed entirely outside the boundaries of the review cards/popups. You MUST report it as Visible even if it sits freely on the page background. Do NOT fail it for being "outside the widget".
 
@@ -802,13 +802,14 @@ Q11. **AGGREGATE STAR RATING**: Look at the base widget (the row of avatars in p
 - Q2 FLAT-WALL → Apply RULE 7 → FAIL Category G (Popups & Modals)
 - Q5 VOID-FAILURE → FAIL Category A
 - Q9 PERIMETER_AUDIT (RULE 19 Gutter Scan) → [GUTTER_CLEAR / SQUEEZED-FAIL]
-- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C, unless that popup's DOM_END_TEXT fact says its text is shown in full (AUTHORED ELLIPSIS).
 
 **RULE 21: THE LITERAL-EYE TEST (ANTI-CONFIG BIAS)**
 - **SUPREME AUTHORITY**: Your eyes are the ultimate truth. 
 - **FORBIDDEN HALLUCINATION**: If the configuration expects a feature (e.g., "Read more") but you cannot see it with 100% clarity in the pixels, you MUST report UI Status: **Absent**.
-- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C.
-- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
+- Q10 TEXT_TRUNCATION_ADMISSION (Ends in .. or kn...) → FAIL Category C, unless that popup's DOM_END_TEXT fact says its text is shown in full (AUTHORED ELLIPSIS).
+- **FAIL_EXCEPTION (READ MORE)**: If a review body is short and does NOT end in an ellipsis (...), or its DOM_END_TEXT fact says it is shown in full, the absence of a "Read More" button is a **PASS**, regardless of config. Logic: "Read More" is only required if the content is actually truncated.
+- **AUTHORED ELLIPSIS**: Each captured popup has a DOM_END_TEXT fact quoting the review's real last words. When it says the text is shown in full, an ellipsis that ends the review is the reviewer's own punctuation, present in the source text: it is not truncation (no FAIL_CONTENT_TRUNCATED), and that popup needs no Read More.
 - **FAIL MANDATE**: If config says "Visible" and you report "Absent" (truthfully) AND the content is truncated, the final status MUST be **FAIL**.
 - **RULE 26: MANUAL REVIEW EXCEPTION**: Manual text reviews (where Section 0 data shows 'slug': 'manual' or 'platform': 'Unknown') do NOT have social platform icons. 
 - **PASS_BY_INTENT**: If a review has no platform icon, and Section 0 indicates it is a 'manual' entry (icon URL is null or platform is Unknown), you MUST report **PASS** for 'Show Social Platform Icon'.
@@ -912,7 +913,7 @@ Q3. Content parity across scrolling cards? → [CONSISTENT / MISMATCHED]
 **FAILURE TRIGGERS:**
 - Q1 SOME PARTIAL or Q2 INCONSISTENT → Apply RULE 2 → FAIL Category A
 - Q3 MISMATCHED → FAIL Category A
-- **SHARPNESS**: Apply RULE 1. **ZERO TOLERANCE**: Central reviews MUST be razor-sharp. Benchmark the image texture against the text. If text is 1px sharp but image iris/skin is soft/muddy → **FAIL_SHARP_BLURRY**. No exceptions.`,
+- **SHARPNESS**: Apply RULE 1. Judge each central review's image on its own: fail it (**FAIL_SHARP_BLURRY**) only for the Rule 1.A artifacts (step-laddering, macro-blocking, no iris separation). A photo softer than the text beside it is the medium, not a defect.`,
 
       MARQUEE_LEFTRIGHT: `
 **MARQUEE_LEFTRIGHT — WIDGET-SPECIFIC CHECKS:**
@@ -924,7 +925,7 @@ Q3. Content parity across scrolling cards? → [CONSISTENT / MISMATCHED]
 - Q1 SOME PARTIAL (if in center) or Q2 INCONSISTENT → Apply RULE 2 → FAIL Category A
 - Q1 SOME PARTIAL (if ONLY at Left/Right edges) → **PASS** (Expected Marquee Behavior)
 - Q3 MISMATCHED → FAIL Category A
-- **SHARPNESS**: Apply RULE 1. **ZERO TOLERANCE**: Central reviews MUST be razor-sharp. Benchmark the image texture against the text. If text is 1px sharp but image iris/skin is soft/muddy → **FAIL_SHARP_BLURRY**. No exceptions.`,
+- **SHARPNESS**: Apply RULE 1. Judge each central review's image on its own: fail it (**FAIL_SHARP_BLURRY**) only for the Rule 1.A artifacts (step-laddering, macro-blocking, no iris separation). A photo softer than the text beside it is the medium, not a defect.`,
 
       CAROUSEL_SLIDER: `
 **CAROUSEL_SLIDER — WIDGET-SPECIFIC CHECKS:**
@@ -968,6 +969,8 @@ Q4. **SLIDER MOTION**: Logos appear horizontally aligned in a continuous strip? 
 **FLOATING_BADGE — WIDGET-SPECIFIC CHECKS:**
 This is a fixed-position BAR (about 254x68) pinned to a page corner. Collapsed, it shows a score
 numeral, a star row, a review count and ONE platform icon. **It shows no review at all** until opened.
+Opened, it grows a scrolling panel of review cards above the bar, each with stars, a platform icon,
+a review date and, when the text is truncated, Read More. Judge those features ONLY in the panel.
 Q1. Is the collapsed bar fully on screen and not cut by the page edge? → [FULLY VISIBLE / CLIPPED]
 Q2. Does the bar show a score, a star row and a count? → [ALL PRESENT / MISSING: name which]
 Q3. If an expanded panel screenshot exists, does it show a scrolling list of review cards? → [YES / NO / NO PANEL SCREENSHOT]
@@ -976,7 +979,9 @@ Q3. If an expanded panel screenshot exists, does it show a scrolling list of rev
 - Q1 CLIPPED → FAIL Category A. Note: this widget is position:fixed, so it legitimately sits against a viewport edge; fail only if the bar's own content is sliced.
 - Q2 MISSING → FAIL Category A
 - **You are PROHIBITED from failing this widget for having no review cards, no reviewer names, no avatars and no review dates on the collapsed bar. That is its design.**
-- Q3 NO PANEL SCREENSHOT → report per-review features as NOT_APPLICABLE, never FAIL`,
+- Q3 NO PANEL SCREENSHOT → report per-review features as NOT_APPLICABLE, never FAIL. A DOM fact states when the panel was clicked open and captured.
+- **SCROLL EDGE IS NOT OVERLAP**: The panel's review list scrolls inside a fixed window whose bottom edge is the top edge of the rating bar. A card straddling that edge (or the list's top edge, after scrolling) is partly outside the window: its hidden part is simply scrolled out of view, and the bar does not cover it. That holds wherever the cut falls on the card, including through the middle of the review text: it is scroll clipping, never truncation "within the visible card area". You are PROHIBITED from reporting overlap, blockage, slicing or truncation for such a card, in any category and in STEP 2. The scrolled screenshot shows later cards sitting fully inside the panel. A DOM fact names the cards each screenshot cuts.
+- **This widget has NO Feedspace branding pill, by design.** Never report branding as absent.`,
 
       REVIEW_BADGE: `
 **REVIEW_BADGE — WIDGET-SPECIFIC CHECKS:**
@@ -987,12 +992,15 @@ and no score numeral (the stars carry the rating).
 Q1. Are all source cards fully visible and not clipped? → [ALL VISIBLE / SOME CLIPPED]
 Q2. Does each card show a rating and a count? → [ALL PRESENT / MISSING: name which]
 Q3. Which layout is rendered? → [CARD / AWARD]
+Q4. Is there a MODAL screenshot: one review card over a dimmed page, with a "<current>/<total>" navigation strip below it? → [MODAL PRESENT / NO MODAL SCREENSHOT]
 
 **FAILURE TRIGGERS:**
 - Q1 SOME CLIPPED → Apply RULE 2 → FAIL Category A
 - Q2 MISSING → FAIL Category A
 - **If Q3 is AWARD, you are PROHIBITED from failing for a missing platform logo, missing card border, missing card background or missing score numeral. The Award Layout has none of those by design.**
-- **You are PROHIBITED from failing this widget for having no reviewer names, no review text, no avatars and no review dates. It renders per-source aggregates, not reviews.**`,
+- **On the resting row, you are PROHIBITED from failing this widget for having no reviewer names, no review text, no avatars and no review dates. The row renders per-source aggregates, not reviews.**
+- Q4 MODAL PRESENT → judge review date, Read More and the Feedspace branding pill (below the card) inside the modal screenshots.
+- Q4 NO MODAL SCREENSHOT → report review date, Read More and Feedspace branding NOT_APPLICABLE, never FAIL.`,
 
       REVIEW_AND_RATINGS: `
 **REVIEW_AND_RATINGS — WIDGET-SPECIFIC CHECKS:**
@@ -1091,10 +1099,10 @@ Q5. **RATING AUDIT**: Look directly ABOVE or BELOW the reviewer's name/title on 
 - Apply RULE 1 (Sharpness), RULE 9 (Identifiers), and RULE 11 (Skeletons)
 Q1. **SKELETON CHECK**: Are avatars rendered as vibrating gray circles? → [SKELETON_PASS_FORCE / ACTUAL AVATARS].
 Q2. **MANDATORY FORENSIC QUALITY INVENTORY (MFQI - PIXEL SKEPTIC)**:
-    - **THE RAZOR COMPARISON (IRON LOCK)**: You are PROHIBITED from reporting 'Sharp' based on overall appearance. You MUST benchmark the avatar pixels against the razor-sharp vector text (the review name).
-    - **TEXTURE DELTA (MANDATORY)**: State the edge width of a text character (usually 1px) and the edge width of the avatar details (eyes/nose/hair).
-    - **FAIL TRIGGER**: If Avatar Edge Width > Text Edge Width (e.g., text is 1px but avatar is 3px fuzzy), trigger **FAIL_SHARP_BLURRY**.
-    - **LOG FORMAT**: "[Name/ID] | TextEdge: 1px | AvatarDetail: [X]px | Delta: [DIFF]px | Texture: [Grainy/Razor/Muddy/Watercolor] | Verdict"
+    - **JUDGE THE AVATAR ON ITS OWN (RULE 1, DIFFERENTIAL SHARPNESS AUDIT)**: A photo is always softer than the vector text beside it; that is the medium, not a defect. Never measure an avatar against the text, and never report a difference in edge width as a finding.
+    - **ARTIFACT CHECK (RULE 1.A)**: Look for damage in the avatar itself: step-laddering on diagonal edges, macro-blocking in skin tones, or eyes with no iris/pupil separation.
+    - **FAIL TRIGGER**: Report **FAIL_SHARP_PIXELATION**, **FAIL_SHARP_MACRO_BLOCKING** or **FAIL_SHARP_AVATAR** only for one of those artifacts. Natural photo softness or soft focus is a PASS.
+    - **LOG FORMAT**: "[Name/ID] | Artifacts: [none / step-laddering / macro-blocking / no iris separation] | Verdict"
     - **PROOF MANDATE**: You MUST describe a micro-feature (e.g., "I see individual hair strands" or "Faces are mud-blobs with no iris separation").
 Q3. **CONTENT INTEGRITY AUDIT (IRON LOCK)**:
     - **INITIALS**: Do any initials (e.g. "PA") look sliced, half-visible, or cut off? → [YES: FAIL / NO]
@@ -1165,7 +1173,7 @@ WIDGET-SPECIFIC FEATURE DETECTION RULES
 - **Show Review Ratings**: Apply RULE 12 (Scan ANYWHERE near the name—above or below—for stars or numerical boxes/badges like '10' or '9.0' inside the expanded popup cards).
 - **Show Review Date**: Apply RULE 14 (Scan bottom-left of the expanded popup cards).
 - **Read More**: Apply RULE 5 (Scan bottom of long text reviews inside the expanded popup cards).
-- **Feedspace Branding**: Apply RULE 16 (Look at the **Bottom-Right edge** of the **Initial Grid Screenshot (part1.png)**. It is a white pill with 'Capture reviews with Feedspace' and a yellow lightning bolt).
+- **Feedspace Branding**: Apply RULE 16 (Look at the **Bottom-Right edge** of the **Initial Grid Screenshot (part1.png)**. It is the RULE 16 pill, which at rest reads 'Want to create your widget?').
 - **Inline CTA**: Apply RULE 18 (MANDATORY: You MUST detect a diagonal upward arrow '↗' inside a styled button at the bottom of each expanded popup card. The button color and text can vary, but the arrow is the mandatory signature).
 
 **AVATAR_CAROUSEL:**

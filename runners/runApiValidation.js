@@ -93,7 +93,7 @@ async function run() {
         const seenPairs = new Set();
         allApiData = rawBatch.filter(entry => {
             const rawUrl = entry.customer_url || entry.url;
-            const type = (entry.widget_type || entry.type || '').toLowerCase();
+            const type = String(entry.widget_type || entry.type || '').toLowerCase();
             const id = entry.unique_widget_id || entry.id || '';
             const key = `${normalizeUrl(rawUrl)}|${type}|${id}`;
             if (seenPairs.has(key)) return false;

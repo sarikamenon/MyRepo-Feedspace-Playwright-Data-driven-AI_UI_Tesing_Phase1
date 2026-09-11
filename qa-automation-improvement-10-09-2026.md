@@ -217,14 +217,15 @@ widget's intended behaviour as a layout failure. Vertical clipping is still chec
 
 ### Verification
 
-Four offline guard suites run without a browser or a Gemini call:
+Five offline guard suites run without a browser or a Gemini call:
 
 ```bash
-npm run test:guards        # all four suites
-npm run test:coverage      # widget coverage guard       -> 89 assertions
-npm run test:regression    # false-positive corpus       -> 32 assertions
-npm run test:engine        # real processResults         -> 13 assertions
-npm run test:invariants    # evaluate-argument invariant -> 1 check over 46 call sites
+npm run test:guards        # all five suites
+npm run test:coverage      # widget coverage guard       -> 96 assertions
+npm run test:regression    # false-positive corpus       -> 56 assertions
+npm run test:engine        # real processResults         -> 49 assertions
+npm run test:invariants    # static invariants           -> 2 checks: 45 call sites, 9 DOM tokens
+npm run test:movement      # vertical-scroll verdict     -> 14 assertions
 ```
 
 **`tests/widgetCoverage.test.js`** asserts that every widget type the product ships is either supported
@@ -242,7 +243,7 @@ longer manufactures that specific failure. It imports the engine's clearing and 
 than copying them.
 
 **`tests/aiEngineProcessResults.test.js`** and **`tests/staticInvariants.test.js`** were added after the
-live runs; see Live verification below.
+live runs; see Live verification below. **`tests/movementVerdict.test.js`** came with O-4.
 
 `node --check` passes on every file under `helpers/`, `runners/` and `tests/`, and every
 `Configs/*.json` parses. `testData/processed_urls.json` is empty and does not parse as JSON; that
@@ -394,14 +395,11 @@ assertions), where the earlier corpus only checked what the prompt says.
 
 - The AI verdict itself. Without a Gemini key every run returns the mock before the prompt is built,
   so prompt wording and `processResults` are covered only by the offline suites.
-- The vertical-scroll `geometricWarnings` crash fix. The demo showed no Read More, so that branch never
-  ran. Vertical scroll also tracked **0 columns**: its selectors do not reach the shadow root, so its
-  movement verification is inert (pre-existing, not fixed here).
-- The carousel sentinel now runs, but it queries `document`, which does not pierce the widget's shadow
-  root, and pushes to `interactionContext.geometricWarnings`, which is undefined. It is safe but inert
-  (pre-existing, not fixed here).
-- Floating Badge and Review Badge have no interaction helper, so their popover-only features report
-  `NOT_APPLICABLE`.
+
+The three other items first listed here (the vertical-scroll popup branch and column tracking, the
+carousel sentinel, and the missing badge helpers) were closed afterwards; see **Open issues closed**.
+One was misdiagnosed here: vertical scroll tracked 0 columns because its selectors did not match
+Astro's markup and its `has` filter could never match, not because of the shadow root (O-4).
 
 ### Production-path verification (11-09-2026)
 
@@ -429,7 +427,7 @@ with the Gemini and Basecamp variables explicitly unset, so nothing could post.
 | --- | --- | --- | --- |
 | G-1 | The backend names types 16 and 19 `avatar_carousel_slider` and `avatar_blocks`. The detector knew only `avatarcarousel` and `avatarblock`, so both resolved to `Unknown` and the coverage-gap guard (R-2) would have skipped every such widget in production. The coverage test checked numeric IDs only, which is not what the runners receive | Pre-existing alias gap, made fatal by R-2 | Both names added to `WidgetAliases`. `tests/widgetCoverage.test.js` now also resolves every backend `Widget::TYPE` name, from a pinned table or the live model via `BACKEND_WIDGET_MODEL_PATH`. It failed on exactly these two names before the fix and passes 89/89 after |
 | G-2 | The DOM item count had no selector for the Review Badge, whose Award layout has no logo or avatar, so it counted 0 and the badge survived only through the API bypass. When `/v3/embed/<id>` missed its 5 s timeout, the badge was declared an empty state | Pre-existing, masked by the L-2 bypass | `.feedspace-review-badge-card` added to the item selectors: one per source card, in both the Card and Award layouts |
-| G-3 | Both API runners' dedup calls `.toLowerCase()` on the raw `widget_type` or `type`, which throws on a number and aborts the whole run | Pre-existing | **Not fixed**: unreachable today, because both producers send strings. Worth a `String(...)` guard if a producer ever sends IDs |
+| G-3 | Both API runners' dedup calls `.toLowerCase()` on the raw `widget_type` or `type`, which throws on a number and aborts the whole run | Pre-existing | Fixed afterwards with a `String(...)` guard (O-7). It had been unreachable, because both producers send strings |
 
 Production traffic, read from the last 12 on-demand runs on GitHub: types arrive as names (`masonry`,
 `avatar_group`, `carousel_slider`, `marquee_stripe`, `review_and_ratings`); the Gemini key works in CI
@@ -437,6 +435,148 @@ Production traffic, read from the last 12 on-demand runs on GitHub: types arrive
 prevalidation (site unreachable, a `wp-admin` URL blocked, or no Feedspace script on the page). A
 `review_and_ratings` dispatch arrived on 06-09-2026, so the new widget types already reach this
 pipeline, and on the current `main` that name resolves to `Unknown`.
+
+### Open issues closed (11-09-2026)
+
+The go-live review left these open. All are fixed and verified. The AI verdict itself could not run
+without a Gemini key at the time; it has since run with one (see **Real-Gemini sample run**).
+
+| ID | Issue | Resolution | Verified |
+| --- | --- | --- | --- |
+| O-1 | The Floating Badge had no interaction helper, so every per-review feature was `NOT_APPLICABLE` | `floatingBadgeHelper.js` clicks the bar open, captures the panel, expands one Read More in place, scrolls the list and closes it. A DOM fact tells the model which screenshots show the open panel | Live, production path: panel opened with 6 cards, Read More expanded, list scrolled, panel closed |
+| O-2 | The Review Badge had no interaction helper, so its modal-only features were `NOT_APPLICABLE` | `reviewBadgeHelper.js` opens the modal from up to three source cards, pages once with the next button, and closes each modal before the next click | Live: both sources opened (1/3 and 1/8), next moved 1/3 to 2/3, both modals closed |
+| O-3 | **Both badges would have failed on branding every time.** The Floating Badge has no branding pill at all and the Review Badge shows it only inside its modal, but both configs audited `Feedspace Branding` as a resting-surface feature. The DOM sniff declared it absent and the engine's branding override then forced a FAIL | Floating Badge: `Feedspace Branding` moved to `unsupported_features`. Review Badge: moved to `popover_only_features`. The sniff no longer judges branding that is off the resting surface, and the engine's override skips popover-only features | `aiEngineProcessResults.test.js` (2 new assertions, one proving the override still fails on-surface branding); live logs show the sniff skipping both badges |
+| O-4 | Vertical scroll tracked 0 columns and its movement check was commented out. **Misdiagnosed earlier as a shadow-DOM limit.** Playwright locators pierce open shadow roots; the real causes were selectors that predate Astro's `.feedspace-vertical-scroll-column`, and a `filter({ has: widgetLocator.locator('> *') })`, which is evaluated relative to each candidate and so never matched | Astro's column class first; `has` rebuilt on `:scope > *`. Movement is sampled before any capture, because an `animations: 'disabled'` screenshot restarts the Web Animations that move Astro's columns. Each column's measured direction is checked against its own direction class, and against `marquee_direction` when the config sets it. The result is recorded in `movementVerification` and does not affect the verdict (README, Known gaps) | Live with `marquee_direction: 'alter'`: 3 columns measured UP, DOWN, UP, all matching. `movementVerdict.test.js` (14) covers the loop reset, a stopped widget and legacy columns |
+| O-5 | The vertical-scroll popup branch never ran, so the `geometricWarnings` crash fix was unexercised. Its Read More selector missed Astro's `.feedspace-read-more-btn`, and its `[class*="review-box"]` catch-all matched Astro's own cards and would have faked a popup | Astro's Read More first, falling back to a card click (Astro opens the modal from either), issued as a DOM click because Playwright waits forever for a moving element to hold still. Popups are checked one selector at a time, the catch-all is gone, and the modal is closed after capture | Live: popup opened, captured and closed; `POPUP_DETECTED` reached the warnings |
+| O-6 | The carousel clipping sentinel queried `document` (blind to the shadow root), used pre-Astro card classes, measured against the browser viewport, and pushed to an undefined array | A shadow-piercing locator over `.feedspace-carousel-card`. Clipping is measured against the card's own overflow-hidden ancestors, never the viewport; a slide that half-leaves any horizontally clipping ancestor is skipped; findings go into the real `geometricWarnings` as `ADVISORY:` | Live: clean on the demo (0 clipped). A shadow-DOM fixture reports only the container-clipped card and ignores a card taller than the viewport and an off-track slide; `document.querySelectorAll` sees 0 cards on the same page |
+| O-7 | G-3: a numeric `widget_type` crashed both API runners' dedup | `String(...)` guard | Live: the original crashing payload (`widget_type: 22`) now runs end to end |
+| O-8 | CI never ran the guard suites | Both workflows run `npm run test:guards` after `npm install` and before any browser install | Takes effect on the first CI run after merge |
+| O-9 | The Floating Badge config marked `Show Review Date` and `Show Social Platform Icon` unsupported, so neither was ever audited | Both are now popover-only features, judged in the panel. The design draws a date in the panel card, and a probe of the open demo panel found a date and a platform icon on all 6 cards, and no branding anywhere | Probe; `widgetCoverage.test.js` consistency checks |
+
+`tests/widgetCoverage.test.js` also gained a check that every widget declaring popover-only features has
+an interaction helper dispatched for it. Run against the dispatch as it stood before O-1 and O-2, it
+reports exactly `FLOATING_BADGE` and `REVIEW_BADGE` as missing.
+
+Files added in this pass: `helpers/interactiveWidgets/floatingBadgeHelper.js`,
+`helpers/interactiveWidgets/reviewBadgeHelper.js`, `tests/movementVerdict.test.js`.
+
+### Review fixes (11-09-2026)
+
+A review of the open-issues pass found two defects in it, and two older ones in the engine's DOM rescues.
+
+| ID | Defect | Origin | Resolution | Verified |
+| --- | --- | --- | --- | --- |
+| V-1 | The carousel sentinel matched both Astro's `.feedspace-carousel-card` and the `.feedspace-review-card` nested inside it, so a clipped card was reported twice, under shifted numbers | O-6 | Each card is measured once, by its outermost match | Nested-card fixture: the staged helper reports "card 3" and "card 4" for one clipped card; the fixed helper reports "card 2" once |
+| V-2 | Vertical scroll's card-click fallback could pick a CTA card, which shares `.feedspace-vertical-scroll-card`. Astro ignores clicks on it, so the popup check was silently skipped | O-5 | The fallback excludes `.feedspace-vertical-scroll-cta-card` | Live: the popup still opens, is captured and closes |
+| V-3 | **The star-rating rescue was inverted.** It cleared a ratings FAIL when any warning contained `DOM_TRUTH: Review Ratings`, and the only such warning says the stars are NOT present. A real missing-stars FAIL became a PASS "verified by DOM Sniffer" | Pre-existing | The sniff now emits `DOM_TRUTH_RATINGS_PRESENT` when stars are found, and only where widget-wide stars can only be per-review stars: not a popover-only widget, not the aggregate badges, and not Reviews & Ratings, whose summary has its own star row. The rescue keys on that token, and clears only a "configured visible, reported absent" FAIL for a feature that is not popover-only | `aiEngineProcessResults.test.js`: 5 new assertions, 3 of which fail on the old engine. Live: the carousel and vertical scroll emit the fact; neither badge does |
+| V-4 | The social-icon rescue never fired: it matched `DOM_TRUTH: Platform icons`, while the sniff wrote `DOM_TRUTH: Social Platform Icons` | Pre-existing | The sniff emits `DOM_TRUTH_ICONS_PRESENT`, skipped where icons are popover-only (the Floating Badge panel), and the rescue keys on it with the same limits as V-3 | Engine test. `staticInvariants.test.js` now fails on any `DOM_TRUTH` token the engine keys on that no helper emits; run against the old engine it flags exactly this token |
+
+Simply repairing the two tokens would have opened two new ways to hide real defects: a rescue that also
+cleared a "configured hidden but shown" FAIL, and one that took the Floating Badge bar's summary stars
+and logo as proof of the reviews in its panel. The engine test asserts both limits.
+
+### Real-Gemini sample run (11-09-2026)
+
+With a Gemini key set locally, every supported widget type ran once through the local runner against
+its demo page, and three widgets ran through the on-demand runner with the payload
+`WidgetEmbedTestService` sends, `configurations` taken from each demo widget's `widget_customization`.
+The Basecamp variables were unset throughout.
+
+| Path | PASS | FAIL |
+| --- | --- | --- |
+| Local runner, 15 supported types | 13 | Floating Badge, Cross Slider |
+| On-demand runner, 3 widgets | Review Badge, Carousel | Floating Badge |
+
+Every run exited cleanly with a report, and vertical-scroll movement measured UP, DOWN, UP as
+configured. Both FAILs were the framework's, not the widgets':
+
+| ID | False FAIL | Cause | Resolution | Verified |
+| --- | --- | --- | --- | --- |
+| S-1 | Floating Badge, 2 runs out of 2: "the bar overlaps the review panel", failing up to 6 of the 7 aesthetic categories | The panel's review list scrolls in a window that ends at the bar, so some card is always cut at that edge. A DOM probe found nothing drawn over the list and, scrolled to the end, the last card fully inside it. The model read the scroll edge as overlap and truncation | `floatingBadgeHelper.js` measures the open list (it scrolls, the pixel above its bottom edge is list content, and what lies below is not) and only then emits `DOM_TRUTH_PANEL_SCROLL_EDGE`, naming the card each screenshot's scroll edge cuts. Names are title-cased so an all-caps reviewer cannot spell `CUT` or `PARTIAL` for the forced-FAIL filter. The FLOATING_BADGE block gains **SCROLL EDGE IS NOT OVERLAP** | Live, with the fact before it named cards: 2 of 4 PASS. The one scroll-edge FAIL shrank to a single category, where the model accepted the fact but called a cut through the review text "truncation within the visible card area", which is why the fact now names the card. With named cards: 5 of 5 PASS (4 local, 1 on-demand), every run naming the same cut cards |
+| S-2 | Cross Slider: "Feedspace Branding absent" | Two layers. The config audited branding on the resting surface, but Astro renders the pill only in the review modal, so the DOM sniff declared it absent and the engine forced a FAIL. With only that fixed (a scratch config), the model still failed it: RULE 16 demanded a white pill reading "Capture reviews with Feedspace" with a lightning bolt, while the shipped pill reads "Want to create your widget?" at rest and shows the bolt only on hover | `crossSliderFeature.json`: branding is popover-only. RULE 16 describes the shipped pill in both states and Masonry's "Capture reviews with Feedspace" card, and no longer demands the bolt; the Avatar Blocks note that repeated the old signature is corrected | Live: 2 of 2 PASS, branding found in the popups |
+| S-3 | The branding override said "clipped by parent layout" when the DOM check had found no branding at all | `DOM_TRUTH_BRANDING_ABSENT` covers both cases | The issue text follows the sniff's own warning: clipped, or not in the widget's DOM | Engine test |
+| S-4 | A sliced-text line also failed Avatars and Media as "Blur detected" | The blur keyword list carried geometry words (`sliced`, `partially cut`, `half-moon`, ...), and the blunt verdict words (`sliced-fail`, `blurry-fail`, `json-leak`, ...) were checked against every category's list | Blur keeps softness words only; the geometry words moved to layout, overlaps to containment and duplicated text to content; each category gets its own blunt words | Engine test; replay |
+
+The reasoning scan also logged each cleared line once per keyword list (56 log lines for 3 distinct
+lines in one carousel run). It now logs each once.
+
+**Replay.** Every runner log keeps the raw model answer, so the 18 answers from this run were replayed
+through the pre-fix and the fixed `processResults`, with `analysis_message` rebuilt from the prose
+before the JSON as `aiEngine.js` does. The only verdicts that changed were Avatars and Media on the
+on-demand Floating Badge, from the blur mislabel to PASS. No other widget moved.
+
+**Guards.** On the pre-fix code, 6 of the 8 new engine assertions and 6 of the 7 new regression checks
+fail; the rest are controls. With S-1 to S-6: 96 / 56 / 49 / 2 checks / 14.
+
+**S-5, the avatar compared with the text.** In 1 of the 9 Floating Badge runs after S-1 to S-4, the
+model's own JSON passed Avatars and Media, and the reasoning audit failed both on a line rating an avatar
+photo "soft compared to the sharp text". Three prompt rules still benchmarked images against 1px vector
+text and failed any wider edge, which a photo always has: the avatar audit's RAZOR COMPARISON and the
+ZERO TOLERANCE sharpness rule in both marquee blocks. The historical blur fix (cards 10206673133 and
+10207208742) had removed two other sentences of the same rule. Avatars and Media also shared one blur
+list, so one avatar line failed both.
+
+- `promptBuilder.js`: all three rules now judge the image on its own and fail only for the Rule 1.A
+  artifacts (step-laddering, macro-blocking, no iris separation), as RULE 1 already said elsewhere.
+- `aiEngine.js`: a softness line locks Avatars when it is about an avatar and Media when it is about a
+  logo, thumbnail or video, and both when it names neither. A softness claim whose only evidence is the
+  text beside the image locks nothing, unless the line also names a Rule 1.A artifact. "softer than
+  text" is no longer a blur keyword.
+- Verified: on the pre-S5 code, 3 of the 7 new engine assertions (the other 4 are controls) and all 3
+  new regression checks fail. Replaying all 29 saved answers, the only verdict that changed is that run,
+  from FAIL on Avatars and Media to PASS. Live, on the widgets the three rules cover (Floating Badge
+  twice, Avatar Group, Avatar Slider, Vertical Scroll, Horizontal Scroll, Carousel): Avatars and Media
+  PASS in 7 of 7, overall PASS in 6 of 7.
+
+**S-6, the Avatar Group false FAIL.** The one live FAIL after S-5 was in Read More, Content and Popups,
+which S-5 does not touch, and the baseline run of the same page passed all three. The widget was fine:
+Ayush's review ends in "amazing pace..." in its source text, and the popup shows all of it. Three
+causes, all the framework's:
+
+- The helper took DOM_END_TEXT from `[class*="text"]`, which in Astro's popover matches the reviewer's
+  name, so no fact gave the review's real last words. The model read the authored ellipsis as a clamp,
+  then failed Read More for the missing link.
+- `aiEngine.js` sent the first 14 of the 55 captures (6 of the 26 popups), while the prompt carried DOM
+  facts for all 26 and never said how many screenshots it had. The model claimed 42, cited part17, and
+  quoted a DOM_END_TEXT the log does not contain.
+- Ayush's review is manual but carries a source logo, which Astro draws as a 16px X icon, a lazy
+  image. That capture was taken before it loaded, so the screenshot really had no icon and the Popups
+  finding said so; the data check had passed the feature by matching a review with no logo. In a
+  later run the icon was in the screenshot and the model still reported it absent.
+
+The fixes:
+
+- `avatarGroupHelper.js` reads the review text element, quotes its last words, and says whether the
+  popup shows it in full (not clamped, no Read More shown); an ellipsis in fully shown text is called
+  the review's own. When no captured popup clamps, it emits `DOM_TRUTH_READ_MORE_NOT_NEEDED`, which the
+  engine already honours. It stops opening popups once their captures, with the viewport and branding
+  shots taken after them, would pass the screenshot budget (`imageBudget.js`, shared with the engine),
+  so every popup it describes reaches the model, and so does the branding shot RULE 16 reads. It
+  waits for each popup's images before capturing it, and names the popups that show a header icon
+  (`DOM_TRUTH_POPUP_ICONS_PRESENT`).
+- `promptBuilder.js` states the exact screenshot count, and the Avatar Group block gains
+  **AUTHORED ELLIPSIS**.
+- `aiEngine.js` ignores a finding or reasoning line whose every cited screenshot is past the count
+  sent. A popup icon the helper measured passes a reported-absent icon, although the feature is
+  popover-only. A category finding that only repeats the icons' absence is cleared when the data
+  check passed it or the popups were measured showing one.
+- Verified: on the pre-S6 code, 3 of the 14 new engine assertions fail (6 are controls, and the other
+  5 need the new helper functions), and the 14 new regression checks fail at their first 3, then stop
+  at the missing helper functions. Replaying all 44 saved answers, the only verdict that changed is
+  that run's Popups, from FAIL to PASS; its Content and Read More depend on the new DOM facts, which the
+  old log lacks. Live, on the final code: 3 of 3 Avatar Group runs PASS. Each opened 5 popups and sent
+  13 screenshots with nothing trimmed; the model reported 13, saw Ayush's X icon citing the icon fact,
+  and passed Read More on the DOM fact. A run takes about 90 seconds instead of 224. An earlier batch on
+  intermediate code passed 2 of 3 (the failure was the icon misread) and passed Floating Cards,
+  Carousel, Floating Badge and Review Badge.
+
+**Not fixed: a Vertical Scroll false FAIL.** In the S-6 live batch the Vertical Scroll run failed
+Layout, Containment and Content: the model said the bottom card of each column (Veronica, Anonymous,
+John Erard) had text touching the card's border or cut mid-word. Those are the cards the marquee window
+cuts at its faded bottom edge, which the widget's prompt block already calls a PASS; the model moved
+the finding into other categories, as it did with the Floating Badge's scroll edge before S-1. The
+earlier runs of the same page passed, and S-6 adds only the screenshot count to this widget's prompt.
+An S-1 style fix would name each screenshot's edge-cut cards in a DOM fact.
 
 ### Product follow-up (not this repo)
 

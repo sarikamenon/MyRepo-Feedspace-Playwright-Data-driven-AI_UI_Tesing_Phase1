@@ -70,7 +70,7 @@ async function run() {
     const uniqueApiData = allApiData.filter(entry => {
         const rawUrl = typeof entry === 'string' ? entry : (entry.customer_url || entry.url || '');
         const normUrl = normalizeUrl(rawUrl);
-        const type = (entry.widget_type || entry.type || '').toLowerCase();
+        const type = String(entry.widget_type || entry.type || '').toLowerCase();
         const id = entry.unique_widget_id || entry.id || '';
         const key = `${normUrl}|${type}|${id}`;
         if (seenPairs.has(key)) return false;

@@ -19,11 +19,18 @@ This framework fetches widget data (URLs, types, and configurations) from the Fe
 
 ### 1. Prerequisite
 
-Ensure you have an `.env` file with your Gemini API Key:
+Copy the example environment file and add your Gemini API key:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 GEMINI_API_KEY=your_api_key_here
 ```
+
+`.env` is gitignored. `.env.example` lists every variable the runners read. Keep its `BASECAMP_*`
+block commented out locally, or a local run reports to the real Basecamp project.
 
 ### 2. Install Dependencies
 
@@ -50,11 +57,12 @@ optional; without it the widget type is detected from the DOM and network traffi
 Offline, no browser and no Gemini call:
 
 ```bash
-npm run test:guards        # all four suites
-npm run test:coverage      # every product widget type is supported or exempt, by ID and by backend name
+npm run test:guards        # all five suites
+npm run test:coverage      # types resolve by ID and backend name; configs are consistent; popovers have helpers
 npm run test:regression    # known false positives stay fixed
 npm run test:engine        # the real processResults, fed synthetic model output
-npm run test:invariants    # page/frame evaluate callbacks take at most one parameter
+npm run test:invariants    # evaluate takes one argument; every DOM token the engine keys on is emitted
+npm run test:movement      # the vertical-scroll direction verdict survives the marquee's loop reset
 ```
 
 ## Sample run against the demo widgets
@@ -127,12 +135,16 @@ that no config contradicts itself.
    receive the backend's lowercased `Widget::TYPE` name, never the ID, so that name must resolve
    too. Mirror it in `BACKEND_WIDGET_TYPE_NAMES` in `tests/widgetCoverage.test.js`.
 2. Add the type-to-config-file entry in `helpers/widgetConfigLoader.js` (the only copy of that map).
-3. Author `Configs/<widget>Feature.json` from the design doc, not from the running widget.
+3. Author `Configs/<widget>Feature.json` from the design doc, not from the running widget. A feature
+   the widget renders only after a click, branding included, belongs in `popover_only_features`: the
+   resting-surface DOM sniff never judges those.
 4. Add a pre-analysis block for it in `helpers/promptBuilder.js`.
 5. If the widget renders as a fixed overlay in a body-level portal, add its type to
    `BODY_LEVEL_OVERLAY_TYPES` and the class of its **visible** element to `FEEDSPACE_SELECTORS` in
    `helpers/playwrightHelper.js`. A zero-height wrapper will be judged hidden.
-6. Add an interaction helper in `helpers/interactiveWidgets/` if the widget must be clicked or expanded.
+6. Add an interaction helper in `helpers/interactiveWidgets/` if the widget must be clicked or expanded,
+   and dispatch it from `playwrightHelper.js`. `npm run test:coverage` fails for a widget that declares
+   popover-only features but has no helper, because those features could only ever be `NOT_APPLICABLE`.
 7. Run `npm run test:guards`, then a sample run against its demo page.
 
 Until step 1 is done the runners **skip** the type with status `SKIPPED` and report it as a coverage
@@ -140,9 +152,8 @@ gap rather than failing it, so an unsupported widget never files a bug card.
 
 ## Known gaps
 
-- `FLOATING_BADGE` and `REVIEW_BADGE` are detected, discovered and captured, but have no interaction
-  helper. Their popover-only features report `NOT_APPLICABLE` on every run until one exists.
-- Vertical scroll tracks **0 columns** on shadow-DOM widgets, so its movement verification is inert.
-- The carousel edge sentinel runs but cannot see into the widget's shadow root, so it never reports.
+- The vertical-scroll movement check records its result in the report (`movementVerification`) but
+  does not affect the verdict, because `Cross Scroll Animation` is not in `verticalScrollFeature.json`.
+  Adding it there would turn a column measured moving the wrong way into a FAIL.
 - Types 1, 12, 13, 15, 20 and 21 are deliberately exempt (forms, headless, or legacy). See `EXEMPT` in
   `tests/widgetCoverage.test.js`.
