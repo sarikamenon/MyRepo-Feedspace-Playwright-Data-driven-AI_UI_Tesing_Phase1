@@ -1,4 +1,6 @@
 {
+    "widget_type": "AVATAR_BLOCK",
+    "surface_note": "The resting state is a grid of square, greyscale, bordered avatar tiles. Ratings and every other review element appear ONLY inside the modal opened by clicking a tile.",
     "features": [
         "Show Review Ratings",
         "Show Social Platform Icon",
@@ -6,6 +8,20 @@
         "Show Review Date",
         "Inline CTA",
         "Feedspace Branding"
+    ],
+    "popover_only_features": [
+        "Show Review Ratings",
+        "Show Social Platform Icon",
+        "Read More",
+        "Show Review Date",
+        "Inline CTA"
+    ],
+    "unsupported_features": [
+        "Left & Right Buttons",
+        "Left & Right Shift Buttons",
+        "Slider Indicators",
+        "Show Load More Button",
+        "Show Cross Bar"
     ],
     "commented_features": []
 }

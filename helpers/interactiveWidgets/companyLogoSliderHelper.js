@@ -1,4 +1,5 @@
 const { WidgetDetector } = require('../widgetDetector');
+const MotionFreeze = require('../motionFreeze');
 
 class CompanyLogoSliderHelper {
     /**
@@ -13,11 +14,20 @@ class CompanyLogoSliderHelper {
         const page = context.page || context;
         const screenshotBuffers = [];
 
-        // Step 1: Baseline screenshot (Normal state)
+        // Step 1: Baseline screenshot (Normal state).
+        // This widget is a continuous marquee, so the logo track must be stilled before
+        // any capture: Playwright's animations:'disabled' cancels an infinite animation
+        // rather than holding a frame, leaving logos caught part-way across the track.
         console.log("[LogoSliderHelper] Capturing baseline...");
-        screenshotBuffers.push(
-            await page.screenshot({ fullPage: false, animations: 'disabled' })
-        );
+        await page.waitForTimeout(300);
+        const baselineFreeze = await MotionFreeze.apply(context, 'LogoSliderHelper:baseline');
+        try {
+            screenshotBuffers.push(
+                await page.screenshot({ fullPage: false, animations: 'disabled' })
+            );
+        } finally {
+            await MotionFreeze.release(baselineFreeze, 'LogoSliderHelper:baseline');
+        }
 
         try {
             console.log("[LogoSliderHelper] Starting interaction flow (Edge-Logo Toggle Mode)...");

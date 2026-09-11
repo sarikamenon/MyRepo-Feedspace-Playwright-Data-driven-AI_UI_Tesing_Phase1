@@ -8,5 +8,7 @@
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
-    "commented_features": []
+    "commented_features": [],
+    "surface_note": "The reference implementation: no motion and no popup. Read More expands in place.",
+    "popover_only_features": []
 }

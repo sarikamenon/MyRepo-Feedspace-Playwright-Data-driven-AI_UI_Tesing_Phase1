@@ -2,7 +2,25 @@
  * VerticalScrollHelper.js
  * Programmatically verifies vertical scroll movement and column directions.
  */
+const MotionFreeze = require('../motionFreeze');
+
 class VerticalScrollHelper {
+    /**
+     * Capture a still frame of a marquee that must keep moving.
+     *
+     * This widget forces `animation-play-state: running` so column movement can be
+     * measured, which means an unguarded screenshot lands mid-transit and the AI
+     * audits a half-scrolled card. Positions are sampled before this runs, so the
+     * freeze does not affect the movement verification.
+     */
+    static async _captureStill(page, widgetLocator, label) {
+        await page.waitForTimeout(250);
+        const frozen = await MotionFreeze.apply(page, `VerticalScrollHelper:${label}`);
+        const shot = await widgetLocator.screenshot({ animations: 'disabled' }).catch(() => null);
+        await MotionFreeze.release(frozen, `VerticalScrollHelper:${label}`);
+        return shot;
+    }
+
     /**
      * Verifies vertical scroll movement and column directions.
      * 
@@ -11,7 +29,7 @@ class VerticalScrollHelper {
      * @param {Object} config - Widget configuration (includes allow_cross_scrolling_animation)
      * @returns {Promise<Object>} - Verification results
      */
-    static async interact(context, widgetLocator, config = {}) {
+    static async interact(context, widgetLocator, config = {}, geometricWarnings = []) {
         console.log('[VerticalScrollHelper] Starting vertical movement verification & capture...');
         const screenshots = [];
         const page = context.page ? context.page() : context;
@@ -85,7 +103,7 @@ class VerticalScrollHelper {
             const initialStates = columnCount > 0 ? await this.getPositions(columns) : null;
             if (initialStates) this.logPositions('Initial', initialStates);
 
-            const buf1 = await widgetLocator.screenshot({ animations: 'allow' }).catch(() => null);
+            const buf1 = await this._captureStill(page, widgetLocator, 'phase-1');
             if (buf1) screenshots.push(buf1);
 
             await page.waitForTimeout(2000);
@@ -94,7 +112,7 @@ class VerticalScrollHelper {
             const midStates = columnCount > 0 ? await this.getPositions(columns) : null;
             if (midStates) this.logPositions('Midway', midStates);
 
-            const buf2 = await widgetLocator.screenshot({ animations: 'allow' }).catch(() => null);
+            const buf2 = await this._captureStill(page, widgetLocator, 'phase-2');
             if (buf2) screenshots.push(buf2);
 
             await page.waitForTimeout(2000);
@@ -103,7 +121,7 @@ class VerticalScrollHelper {
             const finalStates = columnCount > 0 ? await this.getPositions(columns) : null;
             if (finalStates) this.logPositions('Final', finalStates);
 
-            const buf3 = await widgetLocator.screenshot({ animations: 'allow' }).catch(() => null);
+            const buf3 = await this._captureStill(page, widgetLocator, 'phase-3');
             if (buf3) screenshots.push(buf3);
 
             // 3️⃣ Read More Interaction (New Requirement)

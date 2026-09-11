@@ -1,5 +1,7 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const PromptBuilder = require('./promptBuilder');
+const { hasClearingVerdict, hasCitation } = require('./reasoningVerdict');
+const { isEmptyWidgetData } = require('./widgetData');
 require('dotenv').config();
 
 class AIEngine {
@@ -199,13 +201,7 @@ class AIEngine {
             w.includes('EMPTY_STATE_FORCE_FAIL') ||
             w.toLowerCase().includes('zero reviews') ||
             w.toLowerCase().includes('currently empty')
-        ) || (
-            config && (
-                (config.widget_data !== undefined && config.widget_data !== null && typeof config.widget_data === 'object' && Object.keys(config.widget_data).length === 0) ||
-                (config.widget_data && Array.isArray(config.widget_data.feeds) && config.widget_data.feeds.length === 0) ||
-                (config.widget_data && Array.isArray(config.widget_data.feeds_data) && config.widget_data.feeds_data.length === 0)
-            )
-        );
+        ) || Boolean(config && config.widget_data != null && isEmptyWidgetData(config.widget_data));
 
         if (isEmptyState && aiData.feature_results) {
             console.log(`[AIEngine] 🛡️ Empty State remediation engaged for ${widgetType}.`);
@@ -495,9 +491,22 @@ class AIEngine {
 
             const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with", "expected", "intended", "required", "normal behavior", "without", "free from", "no evidence of", "does not", "doesn't", "is not", "isn't", "avoiding", "incorrect to", "not a"];
 
+            // Verdicts that CLEAR a defect the model named earlier in the same line.
+            // The negation guard only inspects text BEFORE the keyword, so a sentence
+            // that describes a defect and then dismisses it ("...cut off. This is a PASS
+            // for carousel sliders.") would otherwise be read as an admission of failure.
+            // Rules live in helpers/reasoningVerdict.js so the regression corpus asserts
+            // against the same definitions rather than a copy.
+
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
+
+                // A line that clears its own finding is not an admission of failure.
+                if (hasClearingVerdict(trimmedLine)) {
+                    console.log(`[AIEngine] Reasoning line cleared by its own verdict, not treated as a defect: "${trimmedLine.substring(0, 160)}"`);
+                    continue;
+                }
 
                 // ── Split on Question or Answer separators ──
                 // If the line contains a '?', we treat everything after it as the answer.
@@ -665,24 +674,45 @@ class AIEngine {
 
         const iconProof = extractProof(iconLine);
 
+        // An override may only flip a PASS if the reasoning line points at something specific:
+        // a named screenshot (part3.png), a named card ([Card: Ann]), or an element/position
+        // reference. A bare defect word in prose is an opinion, not a located finding, and
+        // flipping a verdict on it is what produced cards of defects nobody could see.
+        const isCited = hasCitation;
+
+        const requireCitation = (flag, line, label) => {
+            if (!flag) return false;
+            if (isCited(line)) return true;
+            console.log(`[AIEngine] Ignoring ${label} override: reasoning names no screenshot, card or element. Line: "${String(line || '').slice(0, 160)}"`);
+            return false;
+        };
+
+        const layoutCited = requireCitation(mentionsLayoutIssue, layoutLine, 'layout');
+        const avatarCited = requireCitation(mentionsAvatarSharpness, avatarBlurLine, 'avatar sharpness');
+        const mediaCited = requireCitation(mentionsMediaSharpness, mediaBlurLine, 'media sharpness');
+        const iconCited = requireCitation(mentionsIconIssue, iconLine, 'icon');
+
         // 🛡️ REASONING AUDIT: If the AI mentions a clinical defect in its reasoning but passes the JSON, lock the failure.
-        if (mentionsLayoutIssue || mentionsAvatarSharpness || mentionsMediaSharpness || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
+        // iconCited is wired in for symmetry only. No aesthetic category contains "ICON" (A-G are
+        // layout, containment, content, avatar, media, theme, popups), so the ICON branch below
+        // cannot match; icon violations are handled at feature level instead.
+        if (layoutCited || avatarCited || mediaCited || iconCited || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
             (aiData.aesthetic_results || []).forEach(res => {
                 const cat = res.category.toUpperCase();
                 if (res.status === "PASS") {
-                    if (cat.includes("LAYOUT") && mentionsLayoutIssue) {
+                    if (cat.includes("LAYOUT") && layoutCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Visual audit override: ${toFriendlyError(layoutLine, "Layout integrity failure.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("AVATAR") && mentionsAvatarSharpness) {
+                    } else if (cat.includes("AVATAR") && avatarCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(avatarBlurLine, "Blur detected in avatars.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("MEDIA") && mentionsMediaSharpness) {
+                    } else if (cat.includes("MEDIA") && mediaCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(mediaBlurLine, "Blur detected in logos/images.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("ICON") && mentionsIconIssue) {
+                    } else if (cat.includes("ICON") && iconCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Configuration override: Social icon visible despite being OFF in config.`;
                         res.severity = "CRITICAL";
@@ -939,8 +969,14 @@ class AIEngine {
                 (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') ||
                     msg.includes('PARTIAL') || msg.includes('CUT')) &&
                 !msg.includes('SYMMETRY_SIGNAL') &&
-                !msg.includes('EMPTY_STATE_FORCE_FAIL') // Never force FAIL based on empty state
+                !msg.includes('EMPTY_STATE_FORCE_FAIL') && // Never force FAIL based on empty state
+                !msg.startsWith('ADVISORY:') // Evidence for the model to weigh, not a verdict
             );
+
+            const advisories = geometricWarnings.filter(msg => msg.startsWith('ADVISORY:'));
+            if (advisories.length > 0) {
+                console.log(`[AIEngine] ${advisories.length} advisory measurement(s) passed to the model as evidence, not forced failures.`);
+            }
 
             if (clinicalDefects.length > 0) {
                 console.log(`[AIEngine] 🛡️ TRUTH OVERRIDE: Clinical boundary violation detected. Forcing FAIL.`);

@@ -1,0 +1,24 @@
+{
+    "widget_type": "REVIEW_AND_RATINGS",
+    "aggregate_surface": false,
+    "surface_note": "A sticky aggregate summary column (score numeral, star row, count, five-bar histogram) beside a single column of review rows. The rows have NO card surface: no background, border, radius, padding or shadow. The widget opens nothing - no popup, popover or modal - and Read More expands in place.",
+    "features": [
+        "Show Review Date",
+        "Show Review Ratings",
+        "Show Social Platform Icon",
+        "Read More",
+        "Show Load More Button",
+        "Inline CTA",
+        "Feedspace Branding",
+        "Review Image / Avatar"
+    ],
+    "popover_only_features": [],
+    "unsupported_features": [
+        "Review Card Border & Shadow",
+        "Left & Right Buttons",
+        "Slider Indicators",
+        "Show Cross Bar",
+        "Displays Gray mode"
+    ],
+    "commented_features": []
+}

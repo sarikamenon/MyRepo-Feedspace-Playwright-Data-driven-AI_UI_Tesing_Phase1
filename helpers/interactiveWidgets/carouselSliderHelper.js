@@ -1,4 +1,22 @@
+const MotionFreeze = require('../motionFreeze');
+
 class CarouselSliderHelper {
+    /**
+     * Freeze the auto-advance, let the track settle onto a whole slide, capture,
+     * then release so autoplay can move on before the next capture. Without this
+     * the carousel is photographed mid-transit and the partially visible slide is
+     * reported as a clipped card.
+     */
+    static async _captureStable(context, page, label, capture) {
+        // Wait BEFORE freezing: a transition in flight has to finish on its own, because
+        // pausing mid-transit preserves the partial offset rather than settling the track
+        // onto a slide boundary. Freezing after the wait is what makes the frame stable.
+        await page.waitForTimeout(400);
+        const frozen = await MotionFreeze.apply(context, `CarouselSliderHelper:${label}`);
+        const shot = await capture().catch(() => null);
+        await MotionFreeze.release(frozen, `CarouselSliderHelper:${label}`);
+        return shot;
+    }
     /**
      * Interact with Carousel Slider widgets.
      * Navigates the slider and captures screenshots.
@@ -48,10 +66,9 @@ class CarouselSliderHelper {
 
             // 1. First Screenshot: Entire Page
             console.log('[CarouselSliderHelper] Capture 1/3: Entire Page');
-            const fullPageShot = await page.screenshot({
-                fullPage: true,
-                animations: 'disabled'
-            }).catch(() => null);
+            const fullPageShot = await this._captureStable(interactionContext, page, 'full-page', () =>
+                page.screenshot({ fullPage: true, animations: 'disabled' })
+            );
             if (fullPageShot) screenshots.push(fullPageShot);
 
             await page.waitForTimeout(3000); // 3s gap
@@ -64,15 +81,17 @@ class CarouselSliderHelper {
                 const padding = 100;
                 const clipX = Math.max(0, box.x - padding);
                 const clipY = Math.max(0, box.y - padding);
-                const focusShot1 = await page.screenshot({
-                    clip: {
-                        x: clipX,
-                        y: clipY,
-                        width: Math.min(box.width + (padding * 2), vSize.width - clipX),
-                        height: Math.min(box.height + (padding * 2), vSize.height - clipY)
-                    },
-                    animations: 'disabled'
-                }).catch(() => null);
+                const focusShot1 = await this._captureStable(interactionContext, page, 'focus-1', () =>
+                    page.screenshot({
+                        clip: {
+                            x: clipX,
+                            y: clipY,
+                            width: Math.min(box.width + (padding * 2), vSize.width - clipX),
+                            height: Math.min(box.height + (padding * 2), vSize.height - clipY)
+                        },
+                        animations: 'disabled'
+                    })
+                );
                 if (focusShot1) screenshots.push(focusShot1);
             }
 
@@ -86,35 +105,51 @@ class CarouselSliderHelper {
                 const padding = 100;
                 const clipX = Math.max(0, box2.x - padding);
                 const clipY = Math.max(0, box2.y - padding);
-                const focusShot2 = await page.screenshot({
-                    clip: {
-                        x: clipX,
-                        y: clipY,
-                        width: Math.min(box2.width + (padding * 2), vSize.width - clipX),
-                        height: Math.min(box2.height + (padding * 2), vSize.height - clipY)
-                    },
-                    animations: 'disabled'
-                }).catch(() => null);
+                const focusShot2 = await this._captureStable(interactionContext, page, 'focus-2', () =>
+                    page.screenshot({
+                        clip: {
+                            x: clipX,
+                            y: clipY,
+                            width: Math.min(box2.width + (padding * 2), vSize.width - clipX),
+                            height: Math.min(box2.height + (padding * 2), vSize.height - clipY)
+                        },
+                        animations: 'disabled'
+                    })
+                );
                 if (focusShot2) screenshots.push(focusShot2);
             }
 
-            // 🛡️ UNIVERSAL EDGE SENTINEL Logic: Check all visible cards for clipping
+            // 🛡️ UNIVERSAL EDGE SENTINEL Logic: Check all visible cards for clipping.
+            // Horizontal overflow is NOT checked: a carousel is designed to show partially
+            // visible slides at the left and right edges, so flagging them reports the
+            // widget's intended behaviour as a layout failure. Only vertical clipping,
+            // which a carousel never does on purpose, is a defect.
             const cardSelector = '.feedspace-embed-card, .feedspace-review-card, .swiper-slide-active, .slick-active';
             const vSize = page.viewportSize();
 
-            const clips = await page.evaluate((sel, vw, vh) => {
-                const results = [];
-                document.querySelectorAll(sel).forEach((el, idx) => {
-                    const r = el.getBoundingClientRect();
-                    if (r.width > 10 && r.height > 10) {
-                        if (r.right > vw + 5) results.push(`FAIL_RIGHT_EDGE_CLIPPED (Card ${idx + 1})`);
-                        if (r.bottom > vh + 5) results.push(`FAIL_BOTTOM_EDGE_CLIPPED (Card ${idx + 1})`);
-                        if (r.left < -5) results.push(`FAIL_LEFT_EDGE_CLIPPED (Card ${idx + 1})`);
-                        if (r.top < -5) results.push(`FAIL_TOP_EDGE_CLIPPED (Card ${idx + 1})`);
-                    }
-                });
-                return results;
-            }, cardSelector, vSize.width, vSize.height);
+            // Measure against a settled track, never mid-transit.
+            await page.waitForTimeout(400);
+            const sentinelFreeze = await MotionFreeze.apply(interactionContext, 'CarouselSliderHelper:sentinel');
+
+            let clips = [];
+            try {
+                // page.evaluate takes ONE argument. Passing three threw "Too many arguments" on
+                // every run, so this sentinel never measured anything before now.
+                clips = await page.evaluate(({ sel, vh }) => {
+                    const results = [];
+                    document.querySelectorAll(sel).forEach((el, idx) => {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 10 && r.height > 10) {
+                            if (r.bottom > vh + 5) results.push(`FAIL_BOTTOM_EDGE_CLIPPED (Card ${idx + 1})`);
+                            if (r.top < -5) results.push(`FAIL_TOP_EDGE_CLIPPED (Card ${idx + 1})`);
+                        }
+                    });
+                    return results;
+                }, { sel: cardSelector, vh: vSize.height });
+            } finally {
+                // Always release: a throw here used to leave the whole page frozen.
+                await MotionFreeze.release(sentinelFreeze, 'CarouselSliderHelper:sentinel');
+            }
 
             if (clips && clips.length > 0) {
                 clips.forEach(msg => {

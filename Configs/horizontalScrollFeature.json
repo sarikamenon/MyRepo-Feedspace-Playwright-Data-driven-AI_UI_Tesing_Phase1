@@ -7,5 +7,7 @@
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
-    "commented_features": []
+    "commented_features": [],
+    "surface_note": "It has no popup at all - the only widget without one. Read More expands in place.",
+    "popover_only_features": []
 }

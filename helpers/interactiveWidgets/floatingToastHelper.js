@@ -48,7 +48,7 @@ class FloatingToastHelper {
 
             for (let i = 0; i < 20 && screenshotBuffers.length < (maxUniqueCaptures * 2); i++) {
                 // 🧹 CLEAN RESET: If modal is open, click its close button or click outside cleanly
-                await page.evaluate((selList, btnList) => {
+                await page.evaluate(({ selList, btnList }) => { // ONE object arg: a second arg threw, and the .catch below hid it
                     function findRecursively(root, s) {
                         const el = root.querySelector(s);
                         if (el) return el;
@@ -75,7 +75,7 @@ class FloatingToastHelper {
                             modal.click();
                         }
                     }
-                }, expandedSelectors, closeBtnSelectors).catch(() => { });
+                }, { selList: expandedSelectors, btnList: closeBtnSelectors }).catch(() => { });
                 await page.waitForTimeout(1000);
                 await page.mouse.click(20, 20); // Bounce off any existing focus
                 await page.waitForTimeout(500);
@@ -355,7 +355,7 @@ class FloatingToastHelper {
                         }
 
                         // ❌ Close Modal
-                        const closed = await page.evaluate((selList, btnList) => {
+                        const closed = await page.evaluate(({ selList, btnList }) => { // ONE object arg: a second arg threw, and the .catch below hid it
                             function findRecursively(root, s) {
                                 const el = root.querySelector(s);
                                 if (el) return el;
@@ -383,7 +383,7 @@ class FloatingToastHelper {
                                 return true;
                             }
                             return false;
-                        }, expandedSelectors, closeBtnSelectors).catch(() => false);
+                        }, { selList: expandedSelectors, btnList: closeBtnSelectors }).catch(() => false);
 
                         if (closed) {
                             await page.waitForTimeout(1000); // Wait for modal close transition

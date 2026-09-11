@@ -1,4 +1,6 @@
 {
+    "widget_type": "AVATAR_GROUP",
+    "surface_note": "The resting state is a row of overlapping avatar coins about 60px tall, optionally with a Rating Summary block beside it. It is the only widget with no card in its resting state. Every per-review element lives in the popover opened by clicking a coin.",
     "features": [
         "Show Star Ratings",
         "Show Review Ratings",
@@ -7,6 +9,22 @@
         "Show Review Date",
         "Inline CTA",
         "Feedspace Branding"
+    ],
+    "popover_only_features": [
+        "Show Review Ratings",
+        "Show Social Platform Icon",
+        "Read More",
+        "Show Review Date",
+        "Inline CTA"
+    ],
+    "unsupported_features": [
+        "Review Card Border & Shadow",
+        "Left & Right Buttons",
+        "Left & Right Shift Buttons",
+        "Slider Indicators",
+        "Show Load More Button",
+        "Show Cross Bar",
+        "Displays Gray mode"
     ],
     "commented_features": []
 }

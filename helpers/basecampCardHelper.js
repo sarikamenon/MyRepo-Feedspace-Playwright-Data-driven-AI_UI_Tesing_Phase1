@@ -35,6 +35,12 @@ class BasecampCardHelper {
         const reason = this.reasonOf(run).toLowerCase();
         if (status === "FAIL") {
             if (reason.includes("empty state")) return null;
+            // Checked before configuration mismatch so the card is at least LABELLED as a
+            // data problem rather than a widget regression.
+            // NOTE: this only changes the card title. The card is still created in the same
+            // column and assigned to the same person, and the run still counts as FAIL. Real
+            // routing needs a separate column/assignee for data defects.
+            if (reason.includes("test data mismatch")) return "test data mismatch";
             if (reason.includes("configuration mismatch")) return "configuration mismatch";
             if (reason.includes("ui issue")) return "UI issue";
             return "unclassified failure";

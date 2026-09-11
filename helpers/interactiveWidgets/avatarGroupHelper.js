@@ -1,4 +1,34 @@
 class AvatarGroupHelper {
+    /**
+     * Wait for the popover to stop moving before measuring it.
+     *
+     * The popover opens below the coin, flips above when below will not show it, then
+     * clamps horizontally. Sampling the box immediately after the click catches it
+     * part-way through that sequence and reports a position it is still leaving.
+     * Polls until two consecutive samples agree, or the budget runs out.
+     */
+    static async _settlePopupBox(page, popupLocator, initialBox, attempts = 6, gapMs = 150) {
+        let previous = initialBox;
+
+        for (let n = 0; n < attempts; n++) {
+            await page.waitForTimeout(gapMs);
+            const current = await popupLocator.boundingBox().catch(() => null);
+            if (!current) return previous;
+
+            const settled = previous
+                && Math.abs(current.x - previous.x) < 1
+                && Math.abs(current.y - previous.y) < 1
+                && Math.abs(current.width - previous.width) < 1
+                && Math.abs(current.height - previous.height) < 1;
+
+            if (settled) return current;
+            previous = current;
+        }
+
+        console.warn('[AvatarGroupHelper] Popup position never settled; measuring last sample.');
+        return previous;
+    }
+
     static async interact(page, widgetLocator, geometricWarnings) {
         console.log('[AvatarGroupHelper] Starting sequential interaction (5+ avatars, 1536x700)...');
 
@@ -235,24 +265,36 @@ class AvatarGroupHelper {
                     console.log(`[AvatarGroupHelper] Case ${i + 1}: No popup detected after click.`);
                     consecutiveFails++;
                 } else {
-                    const rect = popupBox;
+                    // The popover is viewport-positioned by design: it flips above the row when
+                    // there is no room below, clamps to the viewport, and the PAGE scrolls when it
+                    // outgrows the viewport. Measuring it the instant it opens catches it mid-flip,
+                    // and treating "near the viewport edge" as clipped asserts the opposite of the
+                    // design. Settle first, then judge only genuine overflow.
+                    const rect = await this._settlePopupBox(page, popupLocator, popupBox);
                     const vSize = page.viewportSize();
-                    const distToBottom = vSize.height - (rect.y + rect.height);
-                    const distToRight = vSize.width - (rect.x + rect.width);
-                    
-                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] Boundary Check: y=${Math.round(rect.y)}, h=${Math.round(rect.height)}, x=${Math.round(rect.x)}, w=${Math.round(rect.width)}. Viewport=${vSize.width}x${vSize.height}.`);
 
-                    // 🛡️ UNIVERSAL EDGE SENTINEL Logic
-                    let edgeFail = null;
-                    if (distToBottom < 20) edgeFail = `FAIL_BOTTOM_EDGE_CLIPPED (Gap: ${Math.round(distToBottom)}px)`;
-                    else if (rect.y < 5) edgeFail = `FAIL_TOP_EDGE_CLIPPED (y: ${Math.round(rect.y)}px)`;
-                    else if (distToRight < 10) edgeFail = `FAIL_RIGHT_EDGE_CLIPPED (Gap: ${Math.round(distToRight)}px)`;
-                    else if (rect.x < 5) edgeFail = `FAIL_LEFT_EDGE_CLIPPED (x: ${Math.round(rect.x)}px)`;
+                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] Boundary Check (settled): y=${Math.round(rect.y)}, h=${Math.round(rect.height)}, x=${Math.round(rect.x)}, w=${Math.round(rect.width)}. Viewport=${vSize.width}x${vSize.height}.`);
 
-                    if (edgeFail) {
-                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Popup ${i + 1} is SLICED at the boundary. Issue: ${edgeFail}.`;
-                        console.log(`[SYSTEM ALERT] ${msg}`);
+                    const TOL = 2;
+                    const overflowTop = -rect.y;
+                    const overflowBottom = (rect.y + rect.height) - vSize.height;
+                    const overflowLeft = -rect.x;
+                    const overflowRight = (rect.x + rect.width) - vSize.width;
+
+                    // Only real overflow past the viewport is worth reporting, and even then it is
+                    // advisory: the page can scroll to reveal it, which is the documented behaviour.
+                    const overflows = [];
+                    if (overflowBottom > TOL) overflows.push(`extends ${Math.round(overflowBottom)}px below the viewport`);
+                    if (overflowTop > TOL) overflows.push(`extends ${Math.round(overflowTop)}px above the viewport`);
+                    if (overflowRight > TOL) overflows.push(`extends ${Math.round(overflowRight)}px past the right edge`);
+                    if (overflowLeft > TOL) overflows.push(`extends ${Math.round(overflowLeft)}px past the left edge`);
+
+                    if (overflows.length > 0) {
+                        const msg = `ADVISORY: Popup ${i + 1} ${overflows.join(' and ')} of the ${vSize.width}x${vSize.height} capture viewport. The popover is viewport-anchored and the page scrolls to reveal it, so this is usually a CAPTURE limitation, not a widget defect. Confirm against the screenshots before reporting anything.`;
+                        console.log(`[AvatarGroupHelper] [ADVISORY] ${msg}`);
                         if (geometricWarnings) geometricWarnings.push(msg);
+                    } else {
+                        console.log(`[AvatarGroupHelper] Popup ${i + 1} sits fully inside the viewport after settling. No boundary finding.`);
                     }
 
                     // 🛡️ Parent Container Clipping Check (New) - Detects if parent has overflow:hidden
@@ -291,9 +333,12 @@ class AvatarGroupHelper {
                         return (visibleHeight * visibleWidth) / (r.height * r.width);
                     }).catch(() => 1);
 
-                    if (visibleRatio < 0.98) {
-                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Only ${Math.round(visibleRatio * 100)}% of the review card is visible. Content is being SQUEEZED or SLICED.`;
-                        console.log(`[SYSTEM ALERT] ${msg}`);
+                    // A popover partly outside the viewport is scrolled to, not sliced. Report it as
+                    // advisory evidence, and only once it is substantially off-screen: a 98% threshold
+                    // fires on sub-pixel rounding and on any surface resting against the edge.
+                    if (visibleRatio < 0.85) {
+                        const msg = `ADVISORY: Only ${Math.round(visibleRatio * 100)}% of popup ${i + 1} intersects the capture viewport. This measures the CAPTURE, not the widget: a viewport-anchored popover is revealed by page scroll. Report a defect only if a screenshot actually shows sliced content.`;
+                        console.log(`[AvatarGroupHelper] [ADVISORY] ${msg}`);
                         if (geometricWarnings) geometricWarnings.push(msg);
                     }
 
