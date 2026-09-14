@@ -10,6 +10,9 @@ const path = require('path');
 const AIEngine = require('./aiEngine');
 const ReportHelper = require('./reportHelper');
 const { WidgetDetector } = require('./widgetDetector');
+const WidgetConfigLoader = require('./widgetConfigLoader');
+const { isEmptyWidgetData } = require('./widgetData');
+const { MAX_IMAGES } = require('./imageBudget');
 
 const AvatarGroupHelper = require('./interactiveWidgets/avatarGroupHelper');
 const AvatarCarouselHelper = require('./interactiveWidgets/avatarCarouselHelper');
@@ -23,12 +26,22 @@ const VerticalScrollHelper = require('./interactiveWidgets/verticalScrollHelper'
 const HorizontalScrollHelper = require('./interactiveWidgets/horizontalScrollHelper');
 const MasonryHelper = require('./interactiveWidgets/masonryHelper');
 const AvatarBlockHelper = require('./interactiveWidgets/avatarBlockHelper');
+const FloatingBadgeHelper = require('./interactiveWidgets/floatingBadgeHelper');
+const ReviewBadgeHelper = require('./interactiveWidgets/reviewBadgeHelper');
 
 const MAX_SCREENSHOT_HEIGHT = 10000;
 
 
 // All Feedspace widget selectors — ordered from most specific to least specific
+// Widgets rendered as position:fixed overlays in a body-level portal rather than inside the
+// embed container. They need no scroll-to-find, and page isolation would blank them.
+const BODY_LEVEL_OVERLAY_TYPES = new Set(["FLOATING_TOAST", "FLOATING_BADGE"]);
+
 const FEEDSPACE_SELECTORS = [
+    // The Floating Badge portals into div.feedspace-floating-portal's shadow root, leaving the embed
+    // div it was declared in empty. Its root wrapper is a zero-height block, so target the fixed bar
+    // itself: the only badge element with a box.
+    '.feedspace-floating-badge',
     '.feedspace-shadow-container',
     '.feedspace-embed-main',
     '.feedspace-floating-card',
@@ -298,10 +311,7 @@ class PlaywrightHelper {
                             const configData = configRes.data?.data || configRes.data;
                             if (configData) {
                                 const widgetData = configData.widget_data;
-                                const hasZeroFeeds = !widgetData ||
-                                    (typeof widgetData === 'object' && Object.keys(widgetData).length === 0) ||
-                                    (Array.isArray(widgetData.feeds) && widgetData.feeds.length === 0) ||
-                                    (Array.isArray(widgetData.feeds_data) && widgetData.feeds_data.length === 0);
+                                const hasZeroFeeds = isEmptyWidgetData(widgetData);
 
                                 if (hasZeroFeeds) {
                                     return {
@@ -946,7 +956,10 @@ class PlaywrightHelper {
                 let reason;
                 let statusOverride = 'FALSE_INVOCATION';
                 if (seenTypes.length > 0) {
-                    reason = `Configuration Mismatch: Expected widget type ${this.expectedType}, but widget identified as ${seenTypes.join(', ')}`;
+                    // A real Feedspace widget IS on the page, just not the one the test data
+                    // named. That is a stale or incorrect expected type from the data source,
+                    // not a product regression, so it must not read as a widget UI failure.
+                    reason = `Test Data Mismatch: Expected widget type ${this.expectedType}, but the page embeds ${seenTypes.join(', ')}. The rendered widget was not validated. Verify the expected type in the data source before treating this as a product issue.`;
                     statusOverride = 'FAIL';
                 } else {
                     reason = `False invocation: Feedspace widget not embedded (No valid container or network signature found for ${this.expectedType})`;
@@ -1062,31 +1075,13 @@ class PlaywrightHelper {
             // Force-load widget-specific features now that the type is IDENTIFIED.
             // This ensures absolute feature isolation across all widget types.
             try {
-                const WIDGET_CONFIG_MAP = {
-                    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
-                    'CROSS_SLIDER': 'crossSliderFeature',
-                    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
-                    'STRIP_SLIDER': 'stripSliderFeature',
-                    'MARQUEE_STRIPE': 'stripSliderFeature',
-                    'SINGLE_SLIDER': 'avatarSliderFeature',
-                    'AVATAR_SLIDER': 'avatarSliderFeature',
-                    'AVATAR_GROUP': 'avatarGroupFeature',
-                    'CAROUSEL_SLIDER': 'carouselslider',
-                    'MASONRY': 'masonryFeature',
-                    'GRID': 'masonryFeature',
-                    'MARQUEE_UPDOWN': 'verticalScrollFeature',
-                    'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-                    'FLOATING_TOAST': 'floatingCardsFeature',
-                    'AVATAR_BLOCK': 'avatarBlockFeature'
-                };
                 const lookupType = this.widgetType || this.expectedType;
-                if (lookupType && lookupType !== 'Unknown' && lookupType !== '--url') {
-                    const configName = WIDGET_CONFIG_MAP[lookupType] || lookupType.toLowerCase();
-                    const configPath = path.join(process.cwd(), 'Configs', `${configName}.json`);
+                const configPath = WidgetConfigLoader.resolvePath(lookupType);
+                if (configPath) {
                     console.log(`[PlaywrightHelper] 🛡️  Isolation Check: Looking for ${configPath} (Type: ${lookupType})`);
                     if (fs.existsSync(configPath)) {
-                        const content = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                        this.staticFeatures = content.features;
+                        const content = WidgetConfigLoader.load(lookupType) || {};
+                        this.staticFeatures = content.features || [];
                         console.log(`[PlaywrightHelper] 🛡️  Universal Isolation Layer: Force-loaded ${this.staticFeatures.length} features for ${lookupType}`);
                     } else {
                         console.warn(`[PlaywrightHelper] 🛡️  Isolation Skip: No local config file found at ${configPath}`);
@@ -1123,7 +1118,7 @@ class PlaywrightHelper {
                 document.head.appendChild(style);
             }, DISTRACTION_SELECTORS);
 
-            if (normalizedType !== 'FLOATING_TOAST') {
+            if (!BODY_LEVEL_OVERLAY_TYPES.has(normalizedType)) {
                 await this.slowScrollToFind();
             }
 
@@ -1214,7 +1209,9 @@ class PlaywrightHelper {
                             '[data-feed-id]', '.fe-review-body', '.feedspace-body',
                             '.carousel-item', '.fe-slick-slide', '.slick-slide',
                             '.feedspace-avatar', '.fe-avatar', '[class*="avatar"]',
-                            '.feedspace-logo', '.fe-logo', '[class*="logo"]'
+                            '.feedspace-logo', '.fe-logo', '[class*="logo"]',
+                            // Review Badge source cards: the Award layout has no logo or avatar to count
+                            '.feedspace-review-badge-card'
                         ];
 
                         const findDeep = (root, selectors) => {
@@ -1284,12 +1281,10 @@ class PlaywrightHelper {
                     }
                 }
 
-                // Backup check via config widget_data
-                const hasZeroFeeds = this.config && (
-                    (this.config.widget_data !== undefined && this.config.widget_data !== null && typeof this.config.widget_data === 'object' && Object.keys(this.config.widget_data).length === 0) ||
-                    (this.config.widget_data && Array.isArray(this.config.widget_data.feeds) && this.config.widget_data.feeds.length === 0) ||
-                    (this.config.widget_data && Array.isArray(this.config.widget_data.feeds_data) && this.config.widget_data.feeds_data.length === 0)
-                );
+                // Backup check via config widget_data, using the shared rule (helpers/widgetData.js).
+                // The old inline "any list empty" check re-condemned the Review Badge right after
+                // the API bypass below had correctly cleared it.
+                const hasZeroFeeds = Boolean(this.config && this.config.widget_data != null && isEmptyWidgetData(this.config.widget_data));
 
                 // GENERAL API BYPASS: If DOM sniffing returns 0 items, but the network-intercepted
                 // API config confirms that feeds exist in the database, we bypass the DOM empty-state gate.
@@ -1416,11 +1411,20 @@ class PlaywrightHelper {
                     }
                 }
 
-                if (domTruth.iconsFound) {
+                // The resting-surface sniff cannot vouch for a feature the widget renders only in a popover,
+                // or not at all: the Floating Badge bar's logo is not a per-review icon.
+                const offSurface = feature => ['popoverOnlyFeatures', 'unsupportedFeatures']
+                    .some(fn => WidgetConfigLoader[fn](normalizedType).includes(feature));
+                if (domTruth.iconsFound && !offSurface('Show Social Platform Icon')) {
                     console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Social Icons DETECTED within widget.`);
-                    this.geometricWarnings.push("DOM_TRUTH: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
+                    this.geometricWarnings.push("DOM_TRUTH_ICONS_PRESENT: Social Platform Icons ARE present on the review cards (e.g., next to name or in corner). You MUST report them as 'Visible'.");
                 }
-                if (domTruth.brandingFound) {
+                // Branding a widget renders only in a popover, or not at all, cannot be judged from the
+                // resting DOM. Declaring it absent here forced a FAIL on every badge widget.
+                const brandingOffSurface = offSurface('Feedspace Branding');
+                if (brandingOffSurface) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding is not on the resting surface of ${normalizedType} by design; not judged from the DOM.`);
+                } else if (domTruth.brandingFound) {
                     if (isBrandingClipped) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Feedspace Branding is CLIPPED by ancestors.`);
                         this.geometricWarnings.push("DOM_TRUTH_BRANDING_ABSENT: Feedspace branding is present in the DOM but visually clipped/truncated by the parent webpage layout constraints.");
@@ -1438,8 +1442,18 @@ class PlaywrightHelper {
                     this.geometricWarnings.push("DOM_TRUTH_CARD_CLIPPED: The review cards (boundary lines) are visually clipped/truncated at the bottom by parent webpage layout constraints (overflow: hidden). This means the boundary line of the card is missing/cut off in the UI.");
                 }
 
-                if (!domTruth.starsFound && domTruth.itemCount > 0) {
-                    if (['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)) {
+                // Stars prove per-review ratings only where nothing else on the resting surface carries a
+                // star row: not a popover-only widget (its stars live in the popup), not an aggregate surface
+                // (the badges), and not Reviews & Ratings, whose summary aside has its own star row.
+                const starsInPopover = ['AVATAR_BLOCK', 'AVATAR_CAROUSEL', 'AVATAR_GROUP', 'FLOATING_TOAST', 'COMPANY_LOGO_SLIDER', 'CROSS_SLIDER'].includes(normalizedType)
+                    || WidgetConfigLoader.popoverOnlyFeatures(normalizedType).includes('Show Review Ratings');
+                const starsProveReviews = !starsInPopover && !offSurface('Show Review Ratings')
+                    && !WidgetConfigLoader.isAggregateSurface(normalizedType) && normalizedType !== 'REVIEW_AND_RATINGS';
+                if (domTruth.starsFound && domTruth.itemCount > 0 && starsProveReviews) {
+                    console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings DETECTED on the review cards.`);
+                    this.geometricWarnings.push("DOM_TRUTH_RATINGS_PRESENT: Review Ratings (Stars) ARE present on the review cards.");
+                } else if (!domTruth.starsFound && domTruth.itemCount > 0) {
+                    if (starsInPopover) {
                         console.log(`[PlaywrightHelper] 🛰️  DOM Sniff: Review Ratings NOT FOUND on base widget. AI must check expanded popups.`);
                         this.geometricWarnings.push(`DOM_TRUTH: Base widget has no stars. For ${normalizedType}, stars are inside the expanded review popups. Check the popup screenshots to confirm.`);
                     } else {
@@ -1615,10 +1629,10 @@ class PlaywrightHelper {
             // The floating toast renders body-level fixed overlays outside the feedspace-embed container.
             // Running _isolateWidget() would hide these overlays (they are not children of the target container),
             // resulting in blank white screenshots. FloatingToastHelper captures its own focused clip shots.
-            if (normalizedType !== 'FLOATING_TOAST') {
+            if (!BODY_LEVEL_OVERLAY_TYPES.has(normalizedType)) {
                 await this._isolateWidget();
             } else {
-                console.log('[PlaywrightHelper] ⏭️  FLOATING_TOAST: Skipping page isolation (body-level overlay widget).');
+                console.log(`[PlaywrightHelper] ⏭️  ${normalizedType}: Skipping page isolation (body-level overlay widget).`);
             }
 
 
@@ -1665,18 +1679,13 @@ class PlaywrightHelper {
             await this._handleLoadMoreLoop(interactionContext, screenshotBuffers);
 
             if (normalizedType === 'AVATAR_GROUP') {
+                // The screenshots left in the engine's budget after the viewport shot (STEP 8) and any
+                // branding shot (STEP 7.5) taken below, so the helper opens only popups the model will
+                // see. (The capture callback that sat here was never read by the helper.)
+                const trailingShots = 1 + (domTruth.brandingFound ? 1 : 0);
                 const shots = await AvatarGroupHelper.interact(
                     interactionContext, locator, this.geometricWarnings,
-                    async () => {
-                        const popup = interactionContext
-                            .locator('.fe-review-box, .fe-review-box-inner, [class*="review-box"], .feedspace-avatar-tooltip, [class*="tooltip"], .fe-tooltip')
-                            .filter({ visible: true })
-                            .first();
-                        if (await popup.isVisible()) return await popup.screenshot({ animations: 'disabled' });
-                        return !this.page.isClosed()
-                            ? await this.page.screenshot({ fullPage: false, animations: 'disabled' })
-                            : null;
-                    }
+                    MAX_IMAGES - screenshotBuffers.length - trailingShots
                 );
                 if (shots?.length > 0) screenshotBuffers.push(...shots.filter(Boolean));
 
@@ -1734,6 +1743,12 @@ class PlaywrightHelper {
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
             } else if (normalizedType === 'AVATAR_BLOCK') {
                 const shots = await AvatarBlockHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+            } else if (normalizedType === 'FLOATING_BADGE') {
+                const shots = await FloatingBadgeHelper.interact(interactionContext, locator, this.geometricWarnings);
+                if (shots?.length > 0) screenshotBuffers.push(...shots);
+            } else if (normalizedType === 'REVIEW_BADGE') {
+                const shots = await ReviewBadgeHelper.interact(interactionContext, locator, this.geometricWarnings);
                 if (shots?.length > 0) screenshotBuffers.push(...shots);
             }
 

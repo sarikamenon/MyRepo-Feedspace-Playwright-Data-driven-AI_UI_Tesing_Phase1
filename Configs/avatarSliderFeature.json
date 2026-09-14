@@ -6,5 +6,9 @@
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
-    "commented_features": []
+    "commented_features": [],
+    "surface_note": "No card surface at all - no background, border, radius, padding or shadow. The review sits directly on the page.",
+    "unsupported_features": [
+        "Review Card Border & Shadow"
+    ]
 }

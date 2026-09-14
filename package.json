@@ -4,7 +4,13 @@
   "description": "BDD Automation Framework using Playwright, Cucumber, and POM",
   "main": "index.js",
   "scripts": {
-    "test": "node runValidation.js"
+    "test": "node runners/runValidation.js",
+    "test:guards": "node tests/widgetCoverage.test.js && node tests/falsePositiveRegression.test.js && node tests/aiEngineProcessResults.test.js && node tests/staticInvariants.test.js && node tests/movementVerdict.test.js",
+    "test:invariants": "node tests/staticInvariants.test.js",
+    "test:coverage": "node tests/widgetCoverage.test.js",
+    "test:regression": "node tests/falsePositiveRegression.test.js",
+    "test:engine": "node tests/aiEngineProcessResults.test.js",
+    "test:movement": "node tests/movementVerdict.test.js"
   },
   "keywords": [
     "playwright",

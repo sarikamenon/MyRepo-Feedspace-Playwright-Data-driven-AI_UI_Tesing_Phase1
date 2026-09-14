@@ -15,7 +15,10 @@ const WidgetTypeConstants = {
     16: 'AVATAR_CAROUSEL',
     17: 'CROSS_SLIDER',
     18: 'COMPANY_LOGO_SLIDER',
-    19: 'AVATAR_BLOCK'
+    19: 'AVATAR_BLOCK',
+    22: 'FLOATING_BADGE',
+    23: 'REVIEW_BADGE',
+    24: 'REVIEW_AND_RATINGS'
 };
 
 const WidgetTypeNames = {
@@ -30,7 +33,10 @@ const WidgetTypeNames = {
     AVATAR_CAROUSEL: 16,
     CROSS_SLIDER: 17,
     COMPANY_LOGO_SLIDER: 18,
-    AVATAR_BLOCK: 19
+    AVATAR_BLOCK: 19,
+    FLOATING_BADGE: 22,
+    REVIEW_BADGE: 23,
+    REVIEW_AND_RATINGS: 24
 };
 
 // Frontend alias terms that map to backend constants
@@ -48,10 +54,17 @@ const WidgetAliases = {
     'masonry': 'MASONRY',
     'marqueestripe': 'MARQUEE_STRIPE',
     'avatarcarousel': 'AVATAR_CAROUSEL',
+    'avatarcarouselslider': 'AVATAR_CAROUSEL', // backend Widget::TYPE name
     'crossslider': 'CROSS_SLIDER',
     'avatarslider': 'SINGLE_SLIDER',
     'companylogoslider': 'COMPANY_LOGO_SLIDER',
-    'avatarblock': 'AVATAR_BLOCK'
+    'avatarblock': 'AVATAR_BLOCK',
+    'avatarblocks': 'AVATAR_BLOCK', // backend Widget::TYPE name
+    'floatingbadge': 'FLOATING_BADGE',
+    'reviewbadge': 'REVIEW_BADGE',
+    'reviewandratings': 'REVIEW_AND_RATINGS',
+    'reviewsandratings': 'REVIEW_AND_RATINGS',
+    'reviewratings': 'REVIEW_AND_RATINGS'
 };
 
 // CSS class signatures mapped to widget types
@@ -62,12 +75,17 @@ const CSS_SIGNATURES = [
     { classes: ['fe-feedspace-avatar-group-widget-wrap', 'feedspace-avatar-group'], type: 'AVATAR_GROUP' },
     { classes: ['feedspace-carousel-widget', 'testimonial-slider', 'carousel_slider'], type: 'CAROUSEL_SLIDER' },
     { classes: ['feedspace-marque-main-wrap', 'strip-slider', 'feedspace-strip-slider-widget'], type: 'MARQUEE_STRIPE' },
+    // Ordered before FLOATING_TOAST: both widgets are lazy-mounted into the same
+    // div.feedspace-floating-portal host, so match the badge's own root first.
+    { classes: ['feedspace-floating-badge-root', 'feedspace-floating-badge-widget', 'feedspace-floating-badge'], type: 'FLOATING_BADGE' },
     { classes: ['feedspace-floating-widget', 'fe-floating-toast', 'fe-toast-card', 'fe-chat-bubble'], type: 'FLOATING_TOAST' },
     { classes: ['feedspace-element-horizontal-scroll-widget', 'feedspace-left-right-shadow'], type: 'MARQUEE_LEFTRIGHT' },
     { classes: ['feedspace-single-review-widget', 'single-slider', 'feedspace-single-slider'], type: 'SINGLE_SLIDER' },
     { classes: ['fe-masonry', 'feedspace-masonry', 'masonry-widget'], type: 'MASONRY' },
     { classes: ['feedspace-avatar-carousel', 'fe-avatar-carousel', 'fe-avatar-slider'], type: 'AVATAR_CAROUSEL' },
-    { classes: ['feedspace-avatar-block', 'fe-avatar-block'], type: 'AVATAR_BLOCK' }
+    { classes: ['feedspace-avatar-block', 'fe-avatar-block'], type: 'AVATAR_BLOCK' },
+    { classes: ['feedspace-review-badge-root', 'feedspace-review-badge-card', 'feedspace-review-badge-award'], type: 'REVIEW_BADGE' },
+    { classes: ['feedspace-review-and-ratings-root', 'feedspace-rr-bordered'], type: 'REVIEW_AND_RATINGS' }
 ];
 
 // ── VALID WIDGET TYPE IDs ────────────────────────────────────────────────────
@@ -313,6 +331,10 @@ class WidgetDetector {
         // If attributes and CSS classes fail, check the raw HTML for keywords.
         // We use more specific tokens to avoid generic text matching.
         const snippet = info.htmlSnippet;
+        // Badge checks lead: 'floating-badge' also contains the looser tokens below.
+        if (snippet.includes('floating-badge')) return 'FLOATING_BADGE';
+        if (snippet.includes('review-badge')) return 'REVIEW_BADGE';
+        if (snippet.includes('review-and-ratings')) return 'REVIEW_AND_RATINGS';
         if (snippet.includes('fe-masonry') || snippet.includes('masonry-widget')) return 'MASONRY';
         if (snippet.includes('cross-slider')) return 'CROSS_SLIDER';
         if (snippet.includes('company-logo-slider')) return 'COMPANY_LOGO_SLIDER';

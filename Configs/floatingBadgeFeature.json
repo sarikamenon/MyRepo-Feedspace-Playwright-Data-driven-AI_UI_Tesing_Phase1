@@ -1,0 +1,28 @@
+{
+    "widget_type": "FLOATING_BADGE",
+    "aggregate_surface": true,
+    "surface_note": "Collapsed, this widget is a 254x68 bar showing a score, a star row, a count and one platform icon. It renders NO review at all until the bar is clicked. Every per-review feature lives in the expandable panel, whose cards each carry stars, a platform icon, a review date and, when the text is truncated, Read More. It has no Feedspace branding pill anywhere, by design.",
+    "features": [
+        "Show Review Ratings",
+        "Read More",
+        "Show Review Date",
+        "Show Social Platform Icon"
+    ],
+    "popover_only_features": [
+        "Show Review Ratings",
+        "Read More",
+        "Show Review Date",
+        "Show Social Platform Icon"
+    ],
+    "unsupported_features": [
+        "Inline CTA",
+        "Left & Right Buttons",
+        "Slider Indicators",
+        "Show Load More Button",
+        "Show Cross Bar",
+        "Displays Gray mode",
+        "Review Card Border & Shadow",
+        "Feedspace Branding"
+    ],
+    "commented_features": []
+}

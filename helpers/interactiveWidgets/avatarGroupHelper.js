@@ -1,5 +1,69 @@
+const { MAX_IMAGES } = require('../imageBudget');
+
 class AvatarGroupHelper {
-    static async interact(page, widgetLocator, geometricWarnings) {
+    // The review body in Astro's popover. `[class*="text"]` matched the first Tailwind text-* class,
+    // which is the reviewer's name, so every DOM_END_TEXT fact quoted the name.
+    static REVIEW_TEXT = '.feedspace-review-text, .feedspace-review-full, .fe-review-text';
+
+    // The engine forces a FAIL for any fact containing FAIL_, _EDGE_CLIPPED, PARTIAL or CUT,
+    // case-sensitively, so quoted review words and names must not spell one.
+    static _quote(text) {
+        return String(text || '').replace(/\s+/g, ' ').trim().replace(/FAIL_|_EDGE_CLIPPED|PARTIAL|CUT/g, token => token.toLowerCase());
+    }
+
+    static _endTextFact(name, lastWords, shownInFull) {
+        // The name element also holds the reviewer's role, on a second line.
+        const who = name ? ` for ${this._quote(String(name).split('\n')[0])}` : '';
+        const fact = `TRUTH DATA: DOM_END_TEXT${who} is "${this._quote(lastWords)}". If the screenshot ends before these words, it is a FAIL.`;
+        if (!shownInFull) return fact;
+        const ellipsis = /(\.\.\.|…)$/.test(lastWords)
+            ? ' The ellipsis that ends it is part of the review text itself: it is not truncation, and this popup needs no Read More.'
+            : '';
+        return `${fact} The popup shows this text in full (measured in the DOM: not clamped, no Read More shown).${ellipsis}`;
+    }
+
+    static _readMoreFact(count) {
+        return `DOM_TRUTH_READ_MORE_NOT_NEEDED: In all ${count} captured popups with review text, the text is shown in full and the Read More button stays hidden, because none is long enough to clamp. This is expected behavior.`;
+    }
+
+    static _popupIconsFact(shown, notShown) {
+        const names = list => list.map(name => this._quote(String(name).split('\n')[0])).join(', ');
+        const others = notShown.length > 0 ? ` The other captured popups show none: ${names(notShown)}.` : '';
+        return `DOM_TRUTH_POPUP_ICONS_PRESENT: Measured in the DOM after its images loaded, the popup header shows a source icon at its top-right for: ${names(shown)}.${others} That icon is the review's platform or source logo, so Show Social Platform Icon is Visible.`;
+    }
+
+    /**
+     * Wait for the popover to stop moving before measuring it.
+     *
+     * The popover opens below the coin, flips above when below will not show it, then
+     * clamps horizontally. Sampling the box immediately after the click catches it
+     * part-way through that sequence and reports a position it is still leaving.
+     * Polls until two consecutive samples agree, or the budget runs out.
+     */
+    static async _settlePopupBox(page, popupLocator, initialBox, attempts = 6, gapMs = 150) {
+        let previous = initialBox;
+
+        for (let n = 0; n < attempts; n++) {
+            await page.waitForTimeout(gapMs);
+            const current = await popupLocator.boundingBox().catch(() => null);
+            if (!current) return previous;
+
+            const settled = previous
+                && Math.abs(current.x - previous.x) < 1
+                && Math.abs(current.y - previous.y) < 1
+                && Math.abs(current.width - previous.width) < 1
+                && Math.abs(current.height - previous.height) < 1;
+
+            if (settled) return current;
+            previous = current;
+        }
+
+        console.warn('[AvatarGroupHelper] Popup position never settled; measuring last sample.');
+        return previous;
+    }
+
+    // maxShots: screenshots this helper may add before the engine's MAX_IMAGES is full.
+    static async interact(page, widgetLocator, geometricWarnings, maxShots = MAX_IMAGES) {
         console.log('[AvatarGroupHelper] Starting sequential interaction (5+ avatars, 1536x700)...');
 
         const screenshotBuffers = [];
@@ -176,6 +240,9 @@ class AvatarGroupHelper {
         const targets = avatars.slice(0, 50);
         const capturedFingerprints = new Set();
         const visitedPositions = new Set();
+        const popupTexts = [];
+        const popupIcons = [];
+        let popupsCaptured = 0;
 
         let consecutiveFails = 0;
         let lastY = -1;
@@ -194,6 +261,14 @@ class AvatarGroupHelper {
             // 🛑 Early Exit 2: Aggressive 3-Strike Rule (Combined Duplicates/Duds)
             if (consecutiveFails >= 3 && capturedFingerprints.size > 0) {
                 console.log(`[AvatarGroupHelper] 🛑 Stop: 3 consecutive unproductive interactions after finding unique content. Done.`);
+                break;
+            }
+
+            // 🛑 Early Exit 3: each captured popup adds two screenshots, and the engine sends only
+            // MAX_IMAGES. Past that the model never sees a popup, yet its DOM facts still reached
+            // the prompt, and the model reported defects in popups it never received.
+            if (screenshotBuffers.length + 2 > maxShots) {
+                console.log(`[AvatarGroupHelper] 🛑 Stop: ${popupsCaptured} popups fill the ${MAX_IMAGES} screenshots the AI engine sends.`);
                 break;
             }
 
@@ -235,24 +310,36 @@ class AvatarGroupHelper {
                     console.log(`[AvatarGroupHelper] Case ${i + 1}: No popup detected after click.`);
                     consecutiveFails++;
                 } else {
-                    const rect = popupBox;
+                    // The popover is viewport-positioned by design: it flips above the row when
+                    // there is no room below, clamps to the viewport, and the PAGE scrolls when it
+                    // outgrows the viewport. Measuring it the instant it opens catches it mid-flip,
+                    // and treating "near the viewport edge" as clipped asserts the opposite of the
+                    // design. Settle first, then judge only genuine overflow.
+                    const rect = await this._settlePopupBox(page, popupLocator, popupBox);
                     const vSize = page.viewportSize();
-                    const distToBottom = vSize.height - (rect.y + rect.height);
-                    const distToRight = vSize.width - (rect.x + rect.width);
-                    
-                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] Boundary Check: y=${Math.round(rect.y)}, h=${Math.round(rect.height)}, x=${Math.round(rect.x)}, w=${Math.round(rect.width)}. Viewport=${vSize.width}x${vSize.height}.`);
 
-                    // 🛡️ UNIVERSAL EDGE SENTINEL Logic
-                    let edgeFail = null;
-                    if (distToBottom < 20) edgeFail = `FAIL_BOTTOM_EDGE_CLIPPED (Gap: ${Math.round(distToBottom)}px)`;
-                    else if (rect.y < 5) edgeFail = `FAIL_TOP_EDGE_CLIPPED (y: ${Math.round(rect.y)}px)`;
-                    else if (distToRight < 10) edgeFail = `FAIL_RIGHT_EDGE_CLIPPED (Gap: ${Math.round(distToRight)}px)`;
-                    else if (rect.x < 5) edgeFail = `FAIL_LEFT_EDGE_CLIPPED (x: ${Math.round(rect.x)}px)`;
+                    console.log(`[AvatarGroupHelper] [DIAGNOSTIC] Boundary Check (settled): y=${Math.round(rect.y)}, h=${Math.round(rect.height)}, x=${Math.round(rect.x)}, w=${Math.round(rect.width)}. Viewport=${vSize.width}x${vSize.height}.`);
 
-                    if (edgeFail) {
-                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Popup ${i + 1} is SLICED at the boundary. Issue: ${edgeFail}.`;
-                        console.log(`[SYSTEM ALERT] ${msg}`);
+                    const TOL = 2;
+                    const overflowTop = -rect.y;
+                    const overflowBottom = (rect.y + rect.height) - vSize.height;
+                    const overflowLeft = -rect.x;
+                    const overflowRight = (rect.x + rect.width) - vSize.width;
+
+                    // Only real overflow past the viewport is worth reporting, and even then it is
+                    // advisory: the page can scroll to reveal it, which is the documented behaviour.
+                    const overflows = [];
+                    if (overflowBottom > TOL) overflows.push(`extends ${Math.round(overflowBottom)}px below the viewport`);
+                    if (overflowTop > TOL) overflows.push(`extends ${Math.round(overflowTop)}px above the viewport`);
+                    if (overflowRight > TOL) overflows.push(`extends ${Math.round(overflowRight)}px past the right edge`);
+                    if (overflowLeft > TOL) overflows.push(`extends ${Math.round(overflowLeft)}px past the left edge`);
+
+                    if (overflows.length > 0) {
+                        const msg = `ADVISORY: Popup ${i + 1} ${overflows.join(' and ')} of the ${vSize.width}x${vSize.height} capture viewport. The popover is viewport-anchored and the page scrolls to reveal it, so this is usually a CAPTURE limitation, not a widget defect. Confirm against the screenshots before reporting anything.`;
+                        console.log(`[AvatarGroupHelper] [ADVISORY] ${msg}`);
                         if (geometricWarnings) geometricWarnings.push(msg);
+                    } else {
+                        console.log(`[AvatarGroupHelper] Popup ${i + 1} sits fully inside the viewport after settling. No boundary finding.`);
                     }
 
                     // 🛡️ Parent Container Clipping Check (New) - Detects if parent has overflow:hidden
@@ -291,9 +378,12 @@ class AvatarGroupHelper {
                         return (visibleHeight * visibleWidth) / (r.height * r.width);
                     }).catch(() => 1);
 
-                    if (visibleRatio < 0.98) {
-                        const msg = `TRUTH DATA: FAIL_LAYOUT_CLIPPED detected. Only ${Math.round(visibleRatio * 100)}% of the review card is visible. Content is being SQUEEZED or SLICED.`;
-                        console.log(`[SYSTEM ALERT] ${msg}`);
+                    // A popover partly outside the viewport is scrolled to, not sliced. Report it as
+                    // advisory evidence, and only once it is substantially off-screen: a 98% threshold
+                    // fires on sub-pixel rounding and on any surface resting against the edge.
+                    if (visibleRatio < 0.85) {
+                        const msg = `ADVISORY: Only ${Math.round(visibleRatio * 100)}% of popup ${i + 1} intersects the capture viewport. This measures the CAPTURE, not the widget: a viewport-anchored popover is revealed by page scroll. Report a defect only if a screenshot actually shows sliced content.`;
+                        console.log(`[AvatarGroupHelper] [ADVISORY] ${msg}`);
                         if (geometricWarnings) geometricWarnings.push(msg);
                     }
 
@@ -333,20 +423,47 @@ class AvatarGroupHelper {
                         if (fingerprint) capturedFingerprints.add(fingerprint);
 
                         // 🛡️ Linguistic Truth Injection (Extract last words for AI to verify)
-                        const lastWords = await popupLocator.evaluate((el) => {
-                            const textEl = el.querySelector('.fe-review-text, [class*="text"]');
-                            if (!textEl) return '';
-                            const text = textEl.innerText.trim();
-                            const words = text.split(/\s+/);
-                            // Return the last 4 words for a strong linguistic anchor
-                            return words.slice(-4).join(' ');
-                        }).catch(() => '');
+                        // The header's source icon is a lazy image. Captured before it loads, the popup
+                        // shows no icon and the model reports it absent, so wait for the popup's images.
+                        await popupLocator.evaluate(el => Promise.race([
+                            Promise.all([...el.querySelectorAll('img')].filter(img => !img.complete).map(img => new Promise(done => {
+                                img.addEventListener('load', done, { once: true });
+                                img.addEventListener('error', done, { once: true });
+                            }))),
+                            new Promise(done => setTimeout(done, 4000))
+                        ])).catch(() => {});
 
-                        if (lastWords) {
-                            const msg = `TRUTH DATA: DOM_END_TEXT is "${lastWords}". If the screenshot ends before these words, it is a FAIL.`;
+                        // Also whether the text is shown in full: a review whose source text ends in
+                        // "..." reads as truncation unless the DOM shows nothing is clamped. And whether
+                        // the header shows a source icon, which the model once reported absent while
+                        // its screenshot showed it.
+                        const popupText = await popupLocator.evaluate((el, selector) => {
+                            const icon = el.querySelector('.feedspace-element-header-icon');
+                            const iconImg = icon && icon.querySelector('img');
+                            const iconBox = icon && icon.getBoundingClientRect();
+                            const iconShown = Boolean(iconImg && iconImg.complete && iconImg.naturalWidth > 0
+                                && iconBox.width > 0 && iconBox.height > 0 && getComputedStyle(icon).visibility !== 'hidden');
+                            const textEl = el.querySelector(selector);
+                            if (!textEl) return { lastWords: '', shownInFull: false, iconShown };
+                            const btn = el.querySelector('.feedspace-read-more-btn');
+                            const readMoreShown = Boolean(btn) && getComputedStyle(btn).display !== 'none' && btn.getBoundingClientRect().width > 0;
+                            const words = textEl.innerText.trim().split(/\s+/);
+                            return {
+                                // Return the last 4 words for a strong linguistic anchor
+                                lastWords: words.slice(-4).join(' '),
+                                shownInFull: textEl.scrollHeight <= textEl.clientHeight + 1 && !readMoreShown,
+                                iconShown
+                            };
+                        }, this.REVIEW_TEXT).catch(() => null);
+
+                        const reviewer = fingerprint && !fingerprint.startsWith('SKELETON_') ? fingerprint.split('|')[0] : '';
+                        if (popupText?.lastWords) {
+                            const msg = this._endTextFact(reviewer, popupText.lastWords, popupText.shownInFull);
                             console.log(`[SYSTEM ALERT] ${msg}`);
                             if (geometricWarnings) geometricWarnings.push(msg);
+                            popupTexts.push(popupText);
                         }
+                        if (popupText && reviewer) popupIcons.push({ reviewer, shown: popupText.iconShown });
 
                         // 📸 Viewport Capture (Restored Baseline)
                         console.log(`[AvatarGroupHelper] Case ${i + 1}: Unique review confirmed. Capturing Viewport...`);
@@ -364,6 +481,7 @@ class AvatarGroupHelper {
                             height: Math.min(popupBox.height + (padding * 2), vSize.height - clipY)
                         };
                         screenshotBuffers.push(await page.screenshot({ clip, animations: 'disabled' }));
+                        popupsCaptured++;
                     console.log(`[AvatarGroupHelper] Unique review captured: ${fingerprint ? fingerprint.split('|')[0] : 'Unknown'}`);
                     }
                 }
@@ -375,6 +493,22 @@ class AvatarGroupHelper {
             } catch (err) {
                 console.warn(`[AvatarGroupHelper] Sequential Error ${i + 1}: ${err.message}`);
             }
+        }
+
+        // Read More appears only once a review is long enough to clamp. When no captured popup
+        // clamps its text, its absence is correct, and the engine passes the feature on this fact.
+        if (popupTexts.length > 0 && popupTexts.every(t => t.shownInFull)) {
+            const msg = this._readMoreFact(popupTexts.length);
+            console.log(`[AvatarGroupHelper] ${msg}`);
+            if (geometricWarnings) geometricWarnings.push(msg);
+        }
+
+        // A measured icon outranks the model's reading of a 16px image.
+        const iconsShown = popupIcons.filter(p => p.shown).map(p => p.reviewer);
+        if (iconsShown.length > 0) {
+            const msg = this._popupIconsFact(iconsShown, popupIcons.filter(p => !p.shown).map(p => p.reviewer));
+            console.log(`[AvatarGroupHelper] ${msg}`);
+            if (geometricWarnings) geometricWarnings.push(msg);
         }
 
         return screenshotBuffers;

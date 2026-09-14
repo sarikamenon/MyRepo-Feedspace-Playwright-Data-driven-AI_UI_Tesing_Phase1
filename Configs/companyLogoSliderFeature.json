@@ -7,5 +7,10 @@
         "Show Social Platform Icon",
         "Feedspace Branding"
     ],
+    "popover_only_features": [
+        "Show Review Date",
+        "Show Review Ratings",
+        "Show Social Platform Icon"
+    ],
     "commented_features": []
 }

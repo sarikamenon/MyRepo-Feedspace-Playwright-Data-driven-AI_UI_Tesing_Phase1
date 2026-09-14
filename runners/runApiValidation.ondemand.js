@@ -17,20 +17,7 @@ function normalizeUrl(url) {
 
 
 
-const WIDGET_CONFIG_MAP = {
-    'CAROUSEL_SLIDER': 'carouselslider',
-    'MASONRY': 'masonryFeature',
-    'MARQUEE_STRIPE': 'stripSliderFeature',
-    'AVATAR_GROUP': 'avatarGroupFeature',
-    'SINGLE_SLIDER': 'avatarSliderFeature',
-    'MARQUEE_UPDOWN': 'verticalScrollFeature',
-    'MARQUEE_LEFTRIGHT': 'horizontalScrollFeature',
-    'FLOATING_TOAST': 'floatingCardsFeature',
-    'AVATAR_CAROUSEL': 'avatarCarouselFeature',
-    'CROSS_SLIDER': 'crossSliderFeature',
-    'COMPANY_LOGO_SLIDER': 'companyLogoSliderFeature',
-    'AVATAR_BLOCK': 'avatarBlockFeature'
-};
+const { WIDGET_CONFIG_MAP } = require('../helpers/widgetConfigLoader');
 
 /**
  * On-Demand Orchestrator — reads ONLY from client_payload sent via repository_dispatch.
@@ -83,7 +70,7 @@ async function run() {
     const uniqueApiData = allApiData.filter(entry => {
         const rawUrl = typeof entry === 'string' ? entry : (entry.customer_url || entry.url || '');
         const normUrl = normalizeUrl(rawUrl);
-        const type = (entry.widget_type || entry.type || '').toLowerCase();
+        const type = String(entry.widget_type || entry.type || '').toLowerCase();
         const id = entry.unique_widget_id || entry.id || '';
         const key = `${normUrl}|${type}|${id}`;
         if (seenPairs.has(key)) return false;
@@ -136,6 +123,29 @@ async function run() {
         const configuration = entry.configuration || entry.configurations;
 
         console.log(`\n[${i + 1}/${newUrls.length}] Processing: ${url}`);
+
+        // Coverage gap, not a defect. An unrecognised type has no capability config and no
+        // interaction helper, so auditing it would test a generic review-card feature set
+        // against a widget that may render none of it. Skip and say so, rather than emitting
+        // a failure that becomes a Basecamp card.
+        // Only a type that was actually SUPPLIED and is unrecognised counts as a coverage
+        // gap. An entry with no type at all (a bare URL string, or --url without --type) is
+        // the auto-detect path: let it through so PlaywrightHelper identifies the widget
+        // from the DOM and network, as it did before this guard existed.
+        const typeWasSupplied = typeId !== undefined && typeId !== null && String(typeId).trim() !== ''
+            && String(typeId).trim().toLowerCase() !== 'unknown';
+        if (typeWasSupplied && (!typeName || typeName === 'Unknown')) {
+            console.warn(`   > 🛑 Skipped (Coverage Gap): widget type ID ${typeId} is not supported by this framework yet.`);
+            results.push({
+                url: url,
+                widgetId: widgetUUID,
+                widgetType: `Unsupported (type ${typeId})`,
+                status: 'SKIPPED',
+                error: `Coverage Gap: widget type ID ${typeId} has no detector entry or capability config. Not validated.`,
+                timestamp: new Date().toISOString()
+            });
+            continue;
+        }
 
         // --- PREVALIDATION: URL Reachability Check ---
         console.log(`   > [Prevalidation] Checking reachability for: ${url}`);
@@ -352,7 +362,10 @@ async function run() {
             total: results.length,
             passed: results.filter(r => r.status === 'PASS').length,
             failed: results.filter(r => r.status === 'FAIL').length,
-            errors: results.filter(r => r.status === 'ERROR').length
+            errors: results.filter(r => r.status === 'ERROR').length,
+            // reportHelper already renders summary.skipped; without this it read undefined
+            // and coverage-gap skips vanished from the totals they were counted in.
+            skipped: results.filter(r => r.status === 'SKIPPED').length
         },
         runs: results
     };

@@ -22,6 +22,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # Offline, no browser or API call: fails fast on an alias gap or a contradictory config.
+      - name: Run guard suites
+        run: npm run test:guards
+
       - name: Install Playwright
         run: npx playwright install chromium --with-deps
 

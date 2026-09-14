@@ -1,5 +1,9 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const PromptBuilder = require('./promptBuilder');
+const { hasClearingVerdict, hasCitation } = require('./reasoningVerdict');
+const { isEmptyWidgetData } = require('./widgetData');
+const WidgetConfigLoader = require('./widgetConfigLoader');
+const { MAX_IMAGES } = require('./imageBudget');
 require('dotenv').config();
 
 class AIEngine {
@@ -39,10 +43,10 @@ class AIEngine {
 
         let buffers = Array.isArray(imageBuffers) ? imageBuffers : [imageBuffers];
         
-        // 🛡️ API SAFETY LIMIT: Truncate to 14 images to avoid 400 errors (Payload size or image count limits)
-        if (buffers.length > 14) {
-            console.warn(`[AIEngine] ⚠️  Multi-image payload too large (${buffers.length} images). Truncating to 14 to prevent 400 error.`);
-            buffers = buffers.slice(0, 14);
+        // 🛡️ API SAFETY LIMIT: Truncate to MAX_IMAGES to avoid 400 errors (Payload size or image count limits)
+        if (buffers.length > MAX_IMAGES) {
+            console.warn(`[AIEngine] ⚠️  Multi-image payload too large (${buffers.length} images). Truncating to ${MAX_IMAGES} to prevent 400 error.`);
+            buffers = buffers.slice(0, MAX_IMAGES);
         }
 
         let attempts = 0;
@@ -50,7 +54,7 @@ class AIEngine {
             let text = "";
             try {
                 attempts++;
-                const rawPrompt = PromptBuilder.build(widgetType, config, staticFeatures, buffers.length > 1, geometricWarnings);
+                const rawPrompt = PromptBuilder.build(widgetType, config, staticFeatures, buffers.length > 1, geometricWarnings, buffers.length);
                 // Force a structured format to prevent truncation and ensure valid JSON
                 const prompt = rawPrompt + "\n\nCRITICAL: Respond with your reasoning first, followed by a valid JSON block wrapped in ```json ... ```. Ensure the JSON is complete and well-formed.";
 
@@ -137,7 +141,7 @@ class AIEngine {
                 aiResults.analysis_message = cleanReasoning;
 
                 // Post-process: Calculate status in JS for stability
-                return this.processResults(aiResults, config, widgetType, staticFeatures, geometricWarnings);
+                return this.processResults(aiResults, config, widgetType, staticFeatures, geometricWarnings, buffers.length);
 
             } catch (error) {
                 const isRetriable = error.message.includes('429') || error.status === 429 ||
@@ -191,7 +195,7 @@ class AIEngine {
         }
     }
 
-    processResults(aiData, config, widgetType, staticFeatures, geometricWarnings) {
+    processResults(aiData, config, widgetType, staticFeatures, geometricWarnings, imageCount = 0) {
         if (!aiData) return null;
 
         // Detect Empty State signal (Harden the detection)
@@ -199,13 +203,7 @@ class AIEngine {
             w.includes('EMPTY_STATE_FORCE_FAIL') ||
             w.toLowerCase().includes('zero reviews') ||
             w.toLowerCase().includes('currently empty')
-        ) || (
-            config && (
-                (config.widget_data !== undefined && config.widget_data !== null && typeof config.widget_data === 'object' && Object.keys(config.widget_data).length === 0) ||
-                (config.widget_data && Array.isArray(config.widget_data.feeds) && config.widget_data.feeds.length === 0) ||
-                (config.widget_data && Array.isArray(config.widget_data.feeds_data) && config.widget_data.feeds_data.length === 0)
-            )
-        );
+        ) || Boolean(config && config.widget_data != null && isEmptyWidgetData(config.widget_data));
 
         if (isEmptyState && aiData.feature_results) {
             console.log(`[AIEngine] 🛡️ Empty State remediation engaged for ${widgetType}.`);
@@ -255,8 +253,14 @@ class AIEngine {
         );
         const arrowsAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_ARROWS_ABSENT') || w.includes('DOM_TRUTH_ARROWS_CLIPPED'));
         const indicatorsAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_INDICATORS_ABSENT') || w.includes('DOM_TRUTH_INDICATORS_CLIPPED'));
-        const brandingAbsent = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_BRANDING_ABSENT'));
+        const brandingWarning = (geometricWarnings || []).find(w => w.includes('DOM_TRUTH_BRANDING_ABSENT'));
+        const brandingAbsent = Boolean(brandingWarning);
+        // One token covers both "in the DOM but clipped" and "not in the DOM at all".
+        const brandingClipped = brandingAbsent && /clipped/i.test(brandingWarning);
         const readMoreNotNeeded = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_READ_MORE_NOT_NEEDED'));
+        // The DOM sniff reads only the resting surface, so it proves nothing about a feature the
+        // widget renders solely inside a popover or modal (the Review Badge's branding pill).
+        const popoverOnly = WidgetConfigLoader.popoverOnlyFeatures(widgetType) || [];
 
         if (aiData.feature_results) {
             aiData.feature_results.forEach(res => {
@@ -297,14 +301,18 @@ class AIEngine {
                         : 'Slider indicators (dots/pagination) are absent, which is permitted because the review count is 4 or fewer.';
                 }
 
-                if (isBranding && brandingAbsent && res.ui_status !== 'Visible') {
+                if (isBranding && brandingAbsent && res.ui_status !== 'Visible' && !popoverOnly.includes(res.feature)) {
                     res.ui_status = 'Absent';
                     res.status = (res.config_status === 'Visible') ? 'FAIL' : 'PASS';
-                    res.issue = res.status === 'FAIL' 
-                        ? 'Feedspace branding is configured to be visible but is visually clipped/truncated by parent webpage layout constraints.'
+                    res.issue = res.status === 'FAIL'
+                        ? (brandingClipped
+                            ? 'Feedspace branding is configured to be visible but is visually clipped/truncated by parent webpage layout constraints.'
+                            : "Feedspace branding is configured to be visible but is not in the widget's DOM.")
                         : 'No visual defects detected';
                     res.remarks = res.status === 'FAIL'
-                        ? 'Feedspace branding is visually clipped/truncated by parent layout constraints.'
+                        ? (brandingClipped
+                            ? 'Feedspace branding is visually clipped/truncated by parent layout constraints.'
+                            : 'The DOM check found no Feedspace branding element in the widget.')
                         : 'Feedspace branding is absent but allowed.';
                 }
 
@@ -317,17 +325,28 @@ class AIEngine {
 
                 const isSocialIcon = res.feature === "Show Social Platform Icon" || res.feature === "Show Social Icon" || res.feature === "Social Platform Icon";
                 if (isSocialIcon && res.status === 'FAIL') {
-                    const iconsFoundInDom = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH: Platform icons'));
+                    // A rescue only clears a "configured visible, reported absent" FAIL: with icons configured
+                    // hidden, icons in the DOM confirm the defect instead. The sniff reads the resting surface
+                    // only, so it cannot vouch for a popover-only feature either.
+                    const iconsFoundInDom = res.config_status === 'Visible' && res.ui_status !== 'Visible'
+                        && !popoverOnly.includes(res.feature)
+                        && (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_ICONS_PRESENT'));
+                    // A helper that opens the popovers can vouch for a popover-only icon: it measured the
+                    // icon in the popup itself, after the popup's images loaded.
+                    const iconsFoundInPopups = res.config_status === 'Visible' && res.ui_status !== 'Visible'
+                        && (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_POPUP_ICONS_PRESENT'));
                     const issueText = (res.issue || "").toLowerCase();
                     const remarksText = (res.remarks || "").toLowerCase();
                     const reasonText = (aiData.analysis_message || "").toLowerCase();
                     
-                    if (iconsFoundInDom) {
-                        console.log(`[AIEngine] Overriding Show Social Platform Icon to PASS: DOM Sniffer verified that platform icons are visible on at least one card.`);
+                    if (iconsFoundInDom || iconsFoundInPopups) {
+                        console.log(`[AIEngine] Overriding Show Social Platform Icon to PASS: ${iconsFoundInDom ? 'DOM Sniffer verified that platform icons are visible on at least one card' : 'the opened popups were measured showing a platform icon'}.`);
                         res.status = 'PASS';
                         res.ui_status = 'Visible';
                         res.issue = 'No visual defects detected';
-                        res.remarks = 'Social platform icons are visible in the UI on cards that have social platform data (verified by DOM Sniffer).';
+                        res.remarks = iconsFoundInDom
+                            ? 'Social platform icons are visible in the UI on cards that have social platform data (verified by DOM Sniffer).'
+                            : 'A platform icon is visible in the opened popups (measured in the DOM after their images loaded).';
                     } else if (issueText.includes('web link import') || remarksText.includes('web link import') || reasonText.includes('web link import') ||
                         issueText.includes('not expected') || remarksText.includes('not expected')) {
                         console.log(`[AIEngine] Overriding Show Social Platform Icon to PASS: reviews are Web Link Imports, so social icons are not expected.`);
@@ -340,7 +359,12 @@ class AIEngine {
 
                 const isRating = res.feature === "Show Review Ratings" || res.feature === "Show Star Ratings" || res.feature === "Review Ratings";
                 if (isRating && res.status === 'FAIL') {
-                    const starsFoundInDom = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH: Review Ratings'));
+                    // Same limits as the icon rescue. It used to match "DOM_TRUTH: Review Ratings", and the only
+                    // fact with that prefix says the stars are NOT present, so a real missing-stars FAIL was
+                    // cleared as "verified by DOM Sniffer".
+                    const starsFoundInDom = res.config_status === 'Visible' && res.ui_status !== 'Visible'
+                        && !popoverOnly.includes(res.feature)
+                        && (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_RATINGS_PRESENT'));
                     if (starsFoundInDom) {
                         console.log(`[AIEngine] Overriding Show Review Ratings to PASS: DOM Sniffer verified that star ratings are visible on at least one card.`);
                         res.status = 'PASS';
@@ -486,18 +510,49 @@ class AIEngine {
 
         // ── findAdmission: Scan answer-part of each reasoning line for defect keywords ──
         // ── findAdmission: Scan answer-part for defect keywords with Negation Guard ──
-        const findAdmission = (keys) => {
-            const bluntFailures = [
-                "blurry-fail", "blurred-fail", "fuzzy-fail", "sharp-fail", "blur-fail", "fail-blur",
-                "loss-of-sharpness", "missing-elements", "clipped-fail", "sliced-fail",
-                "json-leakage", "raw-code", "json-leak"
-            ];
+        // findAdmission runs once per keyword list, so log each cleared line only once.
+        const loggedClears = new Set();
+        // The model cites screenshot numbers it never received when DOM facts or SECTION 0 name
+        // reviews none of its screenshots show. A line or finding whose every cited screenshot is
+        // past the number sent describes nothing the model saw.
+        const citesOnlyUnsent = text => {
+            const cited = [...String(text || '').matchAll(/\bpart\s*(\d+)/gi)].map(m => Number(m[1]));
+            return imageCount > 0 && cited.length > 0 && cited.every(n => n > imageCount);
+        };
+        // Blunt verdict words are passed per category. Checked against every list, a
+        // "sliced-fail" line failed Avatars and Media as blur and a "blurry-fail" line failed Layout.
+        // accepts() skips lines that do not concern the category being scanned.
+        const findAdmission = (keys, bluntFailures = [], accepts = () => true) => {
 
             const negations = ["no", "not", "none", "absent", "zero", "never", "✓", "passing", "sharper than", "better than", "consistent with", "expected", "intended", "required", "normal behavior", "without", "free from", "no evidence of", "does not", "doesn't", "is not", "isn't", "avoiding", "incorrect to", "not a"];
+
+            // Verdicts that CLEAR a defect the model named earlier in the same line.
+            // The negation guard only inspects text BEFORE the keyword, so a sentence
+            // that describes a defect and then dismisses it ("...cut off. This is a PASS
+            // for carousel sliders.") would otherwise be read as an admission of failure.
+            // Rules live in helpers/reasoningVerdict.js so the regression corpus asserts
+            // against the same definitions rather than a copy.
 
             for (const line of reasoningLines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
+                if (!accepts(trimmedLine)) continue;
+                if (citesOnlyUnsent(trimmedLine)) {
+                    if (!loggedClears.has(trimmedLine)) {
+                        loggedClears.add(trimmedLine);
+                        console.log(`[AIEngine] Reasoning line cites only screenshots that were never sent (${imageCount} were), not treated as a defect: "${trimmedLine.substring(0, 160)}"`);
+                    }
+                    continue;
+                }
+
+                // A line that clears its own finding is not an admission of failure.
+                if (hasClearingVerdict(trimmedLine)) {
+                    if (!loggedClears.has(trimmedLine)) {
+                        loggedClears.add(trimmedLine);
+                        console.log(`[AIEngine] Reasoning line cleared by its own verdict, not treated as a defect: "${trimmedLine.substring(0, 160)}"`);
+                    }
+                    continue;
+                }
 
                 // ── Split on Question or Answer separators ──
                 // If the line contains a '?', we treat everything after it as the answer.
@@ -608,9 +663,9 @@ class AIEngine {
         };
 
         // ── LAYOUT: Strict tokens only (Case-Sensitive) ──
-        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "ASYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner"];
+        const layoutKeywords = ["FAIL_LAYOUT_CLIPPED", "FAIL_LAYOUT_BLOCKED", "FAIL_LAYOUT_FLAT_WALL", "CRITICAL_LAYOUT_FAILURE", "FAIL_LAYOUT_ASYMMETRIC", "CHOPPED", "rectilinear", "bleeding off", "sharp cut", "DESCENDERS_SLICED", "SQUEEZED-FAIL", "FAIL_LAYOUT_SHATTERED", "ASYMMETRIC-FAIL", "VOID-FAILURE", "ACTUAL_SQUEEZE_DETECTED", "bisected", "missing tail", "sliver", "missing bottom edge", "no bottom border", "no visible bottom", "cut horizontally", "bleeding off the bottom", "borderless state", "corners are not visible", "kn...", "needed to kn...", "shattered word", "incomplete word", "ended in dots", "touching the border", "touching the edge", "no air below stars", "squeezed stars", "clipped stars", "bleeding", "broken layout", "asymmetric padding", "squeezing out", "ASYMMETRIC", "ASYMMETRY", "half-visible", "half visible", "partially cut", "partially visible", "bottom-cut", "container-sliced", "popup-sliced", "missing corner", "sliced", "half-moon", "flattened edge", "flattened arc", "straight line cut", "border touching boundary"];
 
-        const layoutLine = findAdmission(layoutKeywords);
+        const layoutLine = findAdmission(layoutKeywords, ["clipped-fail", "sliced-fail", "missing-elements"]);
         const mentionsLayoutIssue = layoutLine && !analysisMessage.includes("PASS_FORCE_LAYOUT");
 
         const mentionsBlockageIssue = (
@@ -622,23 +677,35 @@ class AIEngine {
         const layoutProof = extractProof(layoutLine);
 
         // ── SHARPNESS: Strict tokens + Fuzzy Keyword fallback ──
+        // Softness words only. Cut and sliced shapes belong to layoutKeywords, overlaps to
+        // containment and duplicated text to content; listed here, every sliced-text line also
+        // became a "Blur detected" FAIL on Avatars and Media.
         const blurKeywords = [
             "compressed image", "low-res", "fuzzy", "blur",
             "pixelated", "smeared", "poor clarity",
             "interpolation", "high-level smoothing",
-            "cloud-like", "soft detail", "hybrid sharpness", "differential fail",
-            "softer than text", "partially cut", "sliced", "half-moon", "flattened edge", "rectilinear cut",
-            "flattened arc", "straight line cut", "star overlap", "duplicated text", "border touching boundary"
+            "cloud-like", "soft detail", "hybrid sharpness", "differential fail"
         ];
+        const blurBlunt = ["blurry-fail", "blurred-fail", "fuzzy-fail", "sharp-fail", "blur-fail", "fail-blur", "loss-of-sharpness"];
 
-        const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", "FAIL_SHARP_PIXELATION", "FAIL_SHARP_MACRO_BLOCKING", ...blurKeywords]);
-        const mediaBlurLine = findAdmission(["FAIL_SHARP_MEDIA", ...blurKeywords]);
+        // One softness list serves two categories, so a line counts for the subject it names (both
+        // when it names neither). A photo is always softer than vector text (promptBuilder RULE 1),
+        // so softness whose only evidence is the text beside it is not a finding.
+        const AVATAR_SUBJECT = /avatar|(profile|reviewer|user) (photo|picture|pic|image)|headshot|initials/i;
+        const MEDIA_SUBJECT = /logo|thumbnail|video|poster|attachment|review image|FAIL_SHARP_MEDIA/i;
+        const AGAINST_TEXT = /textedge|than (the )?(sharp |crisp |vector |razor-sharp )?text|(compared|relative) (to|with) the (sharp |crisp |vector |razor-sharp )?text|vector text/i;
+        const ARTIFACT = /macro[-_ ]?block|pixelat|step-?ladder|no iris|without iris/i;
+        const sharpnessAbout = (subject, other) => line =>
+            !(AGAINST_TEXT.test(line) && !ARTIFACT.test(line)) && (subject.test(line) || !other.test(line));
+
+        const avatarBlurLine = findAdmission(["FAIL_SHARP_AVATAR", "FAIL_SHARP_PIXELATION", "FAIL_SHARP_MACRO_BLOCKING", ...blurKeywords], blurBlunt, sharpnessAbout(AVATAR_SUBJECT, MEDIA_SUBJECT));
+        const mediaBlurLine = findAdmission(["FAIL_SHARP_MEDIA", ...blurKeywords], blurBlunt, sharpnessAbout(MEDIA_SUBJECT, AVATAR_SUBJECT));
 
         const mentionsAvatarSharpness = avatarBlurLine && !analysisMessage.includes("PASS_FORCE_SHARP");
         const mentionsMediaSharpness = mediaBlurLine && !analysisMessage.includes("PASS_FORCE_SHARP");
 
         // ── CONTENT & CONTAINMENT ──
-        const contentLine = findAdmission(["FAIL_CONTENT_TRUNCATED", "FAIL_CONTENT_JSON_LEAK"]);
+        const contentLine = findAdmission(["FAIL_CONTENT_TRUNCATED", "FAIL_CONTENT_JSON_LEAK", "duplicated text"], ["json-leakage", "raw-code", "json-leak"]);
         const containmentLine = findAdmission(["FAIL_CONTAINMENT_COLLISION", "FAIL_ELEMENT_OVERLAP", "collision", "blocking icon", "overlap"]);
 
         const mentionsContentIssue = (
@@ -665,24 +732,45 @@ class AIEngine {
 
         const iconProof = extractProof(iconLine);
 
+        // An override may only flip a PASS if the reasoning line points at something specific:
+        // a named screenshot (part3.png), a named card ([Card: Ann]), or an element/position
+        // reference. A bare defect word in prose is an opinion, not a located finding, and
+        // flipping a verdict on it is what produced cards of defects nobody could see.
+        const isCited = hasCitation;
+
+        const requireCitation = (flag, line, label) => {
+            if (!flag) return false;
+            if (isCited(line)) return true;
+            console.log(`[AIEngine] Ignoring ${label} override: reasoning names no screenshot, card or element. Line: "${String(line || '').slice(0, 160)}"`);
+            return false;
+        };
+
+        const layoutCited = requireCitation(mentionsLayoutIssue, layoutLine, 'layout');
+        const avatarCited = requireCitation(mentionsAvatarSharpness, avatarBlurLine, 'avatar sharpness');
+        const mediaCited = requireCitation(mentionsMediaSharpness, mediaBlurLine, 'media sharpness');
+        const iconCited = requireCitation(mentionsIconIssue, iconLine, 'icon');
+
         // 🛡️ REASONING AUDIT: If the AI mentions a clinical defect in its reasoning but passes the JSON, lock the failure.
-        if (mentionsLayoutIssue || mentionsAvatarSharpness || mentionsMediaSharpness || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
+        // iconCited is wired in for symmetry only. No aesthetic category contains "ICON" (A-G are
+        // layout, containment, content, avatar, media, theme, popups), so the ICON branch below
+        // cannot match; icon violations are handled at feature level instead.
+        if (layoutCited || avatarCited || mediaCited || iconCited || mentionsContentIssue || mentionsDateIssue || mentionsBlockageIssue || mentionsContainmentIssue) {
             (aiData.aesthetic_results || []).forEach(res => {
                 const cat = res.category.toUpperCase();
                 if (res.status === "PASS") {
-                    if (cat.includes("LAYOUT") && mentionsLayoutIssue) {
+                    if (cat.includes("LAYOUT") && layoutCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Visual audit override: ${toFriendlyError(layoutLine, "Layout integrity failure.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("AVATAR") && mentionsAvatarSharpness) {
+                    } else if (cat.includes("AVATAR") && avatarCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(avatarBlurLine, "Blur detected in avatars.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("MEDIA") && mentionsMediaSharpness) {
+                    } else if (cat.includes("MEDIA") && mediaCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Quality audit override: ${toFriendlyError(mediaBlurLine, "Blur detected in logos/images.")}`;
                         res.severity = "CRITICAL";
-                    } else if (cat.includes("ICON") && mentionsIconIssue) {
+                    } else if (cat.includes("ICON") && iconCited) {
                         res.status = "FAIL";
                         res.issue = `[CRITICAL] Configuration override: Social icon visible despite being OFF in config.`;
                         res.severity = "CRITICAL";
@@ -896,6 +984,42 @@ class AIEngine {
             }
         });
 
+        // The model repeats the icons' absence as a category finding. Such a finding follows what is
+        // known about the icons: when the data check passed their absence (a manual review without a
+        // source logo carries none), a finding only about the icons is cleared; when the opened popups
+        // were measured showing one, a finding that only claims they are absent is cleared.
+        const socialFeature = aiResultsArray.find(f => /social (platform )?icon/i.test(f.feature || ''));
+        const iconsNotExpected = Boolean(socialFeature) && socialFeature.status === 'PASS' && socialFeature.ui_status !== 'Visible';
+        const iconsMeasuredInPopups = (geometricWarnings || []).some(w => w.includes('DOM_TRUTH_POPUP_ICONS_PRESENT'));
+        if (iconsNotExpected || iconsMeasuredInPopups) {
+            const ABSENCE = /absent|missing|not (visible|present|shown|rendered|displayed)|\bno (social|platform)/i;
+            // "social" alone also names embeds and share buttons, so the sentence must name an icon.
+            const aboutIcons = s => /\bicons?\b/i.test(s) && /social|platform/i.test(s) && (iconsNotExpected || ABSENCE.test(s));
+            (aiData.aesthetic_results || []).forEach(res => {
+                if (res.status !== 'FAIL' || !res.issue) return;
+                const sentences = res.issue.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+                if (sentences.length > 0 && sentences.every(aboutIcons)) {
+                    console.log(`[AIEngine] Clearing ${res.category}: its only finding is the social icons, which ${iconsNotExpected ? 'the data check passed' : 'were measured in the opened popups'}.`);
+                    res.status = 'PASS';
+                    res.issue = iconsNotExpected
+                        ? 'No visual defects detected (social icons are not expected for these reviews; see Show Social Platform Icon)'
+                        : 'No visual defects detected (a platform icon was measured in the opened popups; see Show Social Platform Icon)';
+                }
+            });
+        }
+
+        // A finding whose every cited screenshot was never sent describes nothing the model saw.
+        if (imageCount > 0) {
+            const clearUnsent = (res, label) => {
+                if (res.status !== 'FAIL' || !citesOnlyUnsent(`${res.issue || ''} ${res.remarks || ''}`)) return;
+                console.log(`[AIEngine] Clearing ${label}: it cites only screenshots that were never sent (${imageCount} were).`);
+                res.status = 'PASS';
+                res.issue = `No visual defects detected (the finding cited only screenshots past part${imageCount}, which were never sent)`;
+            };
+            aiResultsArray.forEach(f => clearUnsent(f, f.feature));
+            (aiData.aesthetic_results || []).forEach(r => clearUnsent(r, r.category));
+        }
+
         // --- EMPTY STATE REMEDIATION ---
         if (isEmptyState && aiData.feature_results) {
             const cardLevelFeatures = [
@@ -939,8 +1063,14 @@ class AIEngine {
                 (msg.includes('FAIL_') || msg.includes('_EDGE_CLIPPED') ||
                     msg.includes('PARTIAL') || msg.includes('CUT')) &&
                 !msg.includes('SYMMETRY_SIGNAL') &&
-                !msg.includes('EMPTY_STATE_FORCE_FAIL') // Never force FAIL based on empty state
+                !msg.includes('EMPTY_STATE_FORCE_FAIL') && // Never force FAIL based on empty state
+                !msg.startsWith('ADVISORY:') // Evidence for the model to weigh, not a verdict
             );
+
+            const advisories = geometricWarnings.filter(msg => msg.startsWith('ADVISORY:'));
+            if (advisories.length > 0) {
+                console.log(`[AIEngine] ${advisories.length} advisory measurement(s) passed to the model as evidence, not forced failures.`);
+            }
 
             if (clinicalDefects.length > 0) {
                 console.log(`[AIEngine] 🛡️ TRUTH OVERRIDE: Clinical boundary violation detected. Forcing FAIL.`);
