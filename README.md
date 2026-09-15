@@ -88,6 +88,9 @@ WIDGET_DATA='{"data":{"url":"<demo url>","type":"review_badge","configurations":
 DAILY_BATCH_SIZE=2 node runners/runApiValidation.js   # rewrites testData/processed_urls.json; restore it afterwards
 ```
 
+To dispatch a real run against a production URL (and how to read the widget id and type off the
+page first), see [on-demand-runs.md](on-demand-runs.md).
+
 ## Project Structure
 
 - `runners/`

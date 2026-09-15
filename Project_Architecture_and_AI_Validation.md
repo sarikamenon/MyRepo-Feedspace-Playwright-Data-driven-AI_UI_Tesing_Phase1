@@ -18,6 +18,10 @@ The project follows a modular architecture designed for scalability and robust i
 - `runApiValidation.js`: daily rotating batch pulled from `https://api.feedspace.io/v3/embed-widget-urls`.
 - `runApiValidation.ondemand.js`: per-embed run triggered by `repository_dispatch`.
 
+The on-demand run is also the manual entry point: `gh api <repo>/dispatches` with event type
+`run-ui-tests` starts one against any production URL. `on-demand-runs.md` documents the payload and
+how to read the widget id and numeric type off the page before dispatching.
+
 All three resolve the widget type first and **skip a supplied type the framework does not recognise**
 as a coverage gap (status `SKIPPED`) rather than validating it with a generic feature set. An entry
 with no type at all takes the auto-detect path instead.
