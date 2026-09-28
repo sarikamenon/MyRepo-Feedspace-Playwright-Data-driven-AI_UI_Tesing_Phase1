@@ -31,7 +31,7 @@ jobs:
 
       - name: Fetch Fresh Basecamp Token
         run: |
-          TOKEN=$(curl -s --header 'x-api-key: a0dd64d9-3c6c-462b-8be3-4d1381659d4b' --header 'x-basecamp-token-key: 11b067c5-649a-49b8-a76d-85c740524db9' https://py-api.hobbo.ai/internal/basecamp/access-token | jq -r '.access_token // empty')
+          TOKEN=$(curl -s -H "x-basecamp-token-key: ${{ secrets.X_BASECAMP_TOKEN_KEY }}" https://py-api.hobbo.ai/internal/basecamp/access-token | jq -r '.access_token // empty')
           if [ -n "$TOKEN" ]; then
             echo "BASECAMP_TOKEN=$TOKEN" >> $GITHUB_ENV
             echo "::add-mask::$TOKEN"
