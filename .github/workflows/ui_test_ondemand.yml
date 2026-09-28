@@ -29,12 +29,23 @@ jobs:
       - name: Install Playwright
         run: npx playwright install chromium --with-deps
 
+      - name: Fetch Fresh Basecamp Token
+        run: |
+          TOKEN=$(curl -s --header 'x-api-key: a0dd64d9-3c6c-462b-8be3-4d1381659d4b' --header 'x-basecamp-token-key: 11b067c5-649a-49b8-a76d-85c740524db9' https://py-api.hobbo.ai/internal/basecamp/access-token | jq -r '.access_token // empty')
+          if [ -n "$TOKEN" ]; then
+            echo "BASECAMP_TOKEN=$TOKEN" >> $GITHUB_ENV
+            echo "::add-mask::$TOKEN"
+            echo "Successfully retrieved fresh Basecamp token"
+          else
+            echo "Warning: Could not fetch Basecamp token from Hobbo API, falling back to secret"
+          fi
+
       - name: Run On-Demand Validation
         run: node runners/runApiValidation.ondemand.js
         env:
           WIDGET_DATA: '${{ toJson(github.event.client_payload) }}'
           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
-          BASECAMP_TOKEN: '${{ secrets.BASECAMP_TOKEN }}'
+          BASECAMP_TOKEN: '${{ env.BASECAMP_TOKEN || secrets.BASECAMP_TOKEN }}'
           BASECAMP_ACCOUNT_ID: '4294983'
           BASECAMP_PROJECT_ID: '19240348'
           BASECAMP_CHAT_ID: '7605911660'
